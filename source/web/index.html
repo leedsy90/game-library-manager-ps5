@@ -1,0 +1,702 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="theme-color" content="#08080b">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Game Library Manager</title>
+<style>
+:root{
+  --bg:#08080b;--side:#0f0f13;--panel:#15151b;--panel2:#1d1d25;--line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.16);
+  --text:#f2f4f8;--body:#c9d0da;--dim:#8f98a6;--accent:#1a8cff;--accent2:#5aaeff;--ok:#3ccf6e;--warn:#f0b23c;--bad:#ff6b63;
+  --r:18px;--r2:12px;--side-w:270px;
+}
+*{box-sizing:border-box}
+html{font-size:16px}
+@media (min-width:1200px){html{font-size:18px}}
+@media (min-width:1700px){html{font-size:20px}}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:1rem/1.5 "Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.app{min-height:100vh}
+/* sidebar */
+.nav{position:fixed;top:0;left:0;bottom:0;width:var(--side-w);background:var(--side);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:22px 14px;z-index:8}
+.brand{display:flex;align-items:center;gap:12px;padding:4px 10px 22px}
+.logo{width:44px;height:44px;border-radius:13px;background:linear-gradient(135deg,#1a8cff,#7a5cff);display:grid;place-items:center;
+  font-weight:800;font-size:1.05rem;letter-spacing:.5px;flex:none}
+.brand b{display:block;font-size:1.05rem;line-height:1.2}
+.brand span{color:var(--dim);font-size:.85rem}
+.nav nav{display:flex;flex-direction:column;gap:4px}
+.nav-item{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:none;border:1px solid transparent;
+  color:var(--body);font:inherit;font-size:1rem;font-weight:600;padding:12px 14px;border-radius:var(--r2);cursor:pointer;min-height:52px}
+.nav-item svg{width:22px;height:22px;flex:none;opacity:.85}
+.nav-item:hover{background:var(--panel)}
+.nav-item.on{background:rgba(26,140,255,.14);color:#fff;border-color:rgba(26,140,255,.35)}
+.nav-item.on svg{color:var(--accent2);opacity:1}
+.nbadge{margin-left:auto;font-size:.8rem;font-weight:700;min-width:28px;text-align:center;padding:2px 9px;border-radius:999px;background:var(--panel2);color:var(--body)}
+.nbadge:empty{display:none}
+.nbadge.warn{background:rgba(240,178,60,.18);color:var(--warn)}
+.nbadge.live{background:rgba(26,140,255,.2);color:var(--accent2)}
+.nav-foot{margin-top:auto;display:flex;flex-direction:column;gap:10px;padding:10px 6px 0}
+.ver{color:var(--dim);font-size:.8rem;text-align:center}
+/* content */
+main{margin-left:var(--side-w);padding:34px 48px 140px}
+.vhead{display:flex;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:22px}
+.vhead h1{font-size:2rem;line-height:1.15;margin:0 0 6px;font-weight:800;letter-spacing:-.3px;display:flex;align-items:center;gap:12px}
+.vhead p{margin:0;color:var(--body);font-size:1.05rem;max-width:70ch}
+.vhead .actions{margin-left:auto;display:flex;gap:10px;flex-wrap:wrap}
+.count{font-size:.9rem;font-weight:700;background:var(--panel2);color:var(--body);border-radius:999px;padding:3px 12px;letter-spacing:0}
+h2.sub{font-size:1.2rem;margin:30px 0 12px;font-weight:700}
+.view[hidden]{display:none}
+/* controls */
+button,select{font:inherit;font-size:.95rem;font-weight:600;color:var(--text);background:var(--panel2);border:1px solid var(--line2);
+  border-radius:var(--r2);padding:12px 20px;min-height:50px;cursor:pointer}
+button:hover{border-color:rgba(255,255,255,.3)}
+button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+button.primary:hover{background:#3399ff}
+button.danger{color:var(--bad)}
+button.small{padding:8px 15px;min-height:42px;font-size:.9rem}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,select:focus-visible,input:focus-visible,label.lib-item:focus-within,.stat:focus-visible{outline:3px solid var(--accent2);outline-offset:3px}
+/* cards */
+.card{border:1px solid var(--line);background:var(--panel);border-radius:var(--r);padding:18px 20px;margin:12px 0}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.spacer{flex:1}
+.title{font-weight:700;font-size:1.1rem}
+.tid{color:var(--dim);font-size:.85rem;font-family:ui-monospace,Menlo,Consolas,monospace}
+.path{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.82rem;color:var(--dim);word-break:break-all;margin-top:4px}
+.arrow{color:var(--accent2);font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.85rem;word-break:break-all;margin-top:4px}
+.detail{font-size:.95rem;margin:8px 0;color:var(--body)}
+.explain{font-size:.95rem;color:var(--body);margin:4px 0 12px;max-width:75ch}
+.badge{font-size:.72rem;font-weight:700;padding:3px 9px;border-radius:7px;background:var(--panel2);border:1px solid var(--line2);color:var(--body);text-transform:uppercase;letter-spacing:.5px}
+.empty{color:var(--body);padding:22px;text-align:center;background:var(--panel);border:1px dashed var(--line2);border-radius:var(--r)}
+.st-ok{color:var(--ok)}.st-warn{color:var(--warn)}.st-bad{color:var(--bad)}
+.bar{height:8px;background:rgba(255,255,255,.08);border-radius:99px;overflow:hidden;margin:12px 0 6px}
+.bar>i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .5s}
+.stats{display:flex;gap:18px;flex-wrap:wrap;font-size:.9rem;color:var(--dim)}
+.stats b{color:var(--text);font-weight:700}
+/* overview */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:18px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;text-align:left;font:inherit;color:inherit;
+  cursor:pointer;min-height:150px;display:flex;flex-direction:column;gap:6px;transition:border-color .2s,transform .2s}
+.stat:hover{border-color:var(--accent);transform:translateY(-2px)}
+.stat .lab{color:var(--dim);font-size:.8rem;font-weight:700;text-transform:uppercase;letter-spacing:.8px}
+.stat .big{font-size:2.3rem;font-weight:800;line-height:1.1}
+.stat .note{color:var(--body);font-size:.92rem}
+.drives{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+.drive{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px 20px}
+.drive .title{font-size:1.1rem}
+/* library */
+.lib-item{display:flex;gap:14px;align-items:flex-start;padding:14px 4px;border-top:1px solid var(--line);cursor:pointer}
+.lib-item:first-child{border-top:0}
+.lib-item input{width:26px;height:26px;margin-top:2px;flex:none;accent-color:var(--accent)}
+.lib-item .grow{flex:1;min-width:0}
+.drive-head{margin:22px 0 8px;color:var(--body);font-size:.95rem;font-weight:700}
+.libcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:4px 20px}
+.job-done{color:var(--ok)}.job-fail{color:var(--bad)}
+.pill{font-size:.85rem;font-weight:700;padding:6px 12px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);color:var(--body);text-align:center}
+.pill.ok{color:var(--ok);border-color:rgba(60,207,110,.35);background:rgba(60,207,110,.08)}
+.pill.bad{color:var(--bad);border-color:rgba(255,107,99,.35);background:rgba(255,107,99,.08)}
+.pill.warn{color:var(--warn);border-color:rgba(240,178,60,.35);background:rgba(240,178,60,.08)}
+details summary{cursor:pointer;color:var(--body);font-size:.9rem;padding:6px 0}
+.banner{border-radius:var(--r);padding:16px 20px;margin:0 0 22px;border:1px solid;font-size:1rem}
+.banner.warn{background:#241c0c;border-color:#5c4518;color:#ffd27a}
+.banner.bad{background:#2a1212;border-color:#6a2a27;color:#ffb3ae}
+.banner .head{display:block;margin-bottom:4px;font-weight:800}
+.fixstate{font-size:.95rem;font-weight:700}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.85em;background:rgba(255,255,255,.07);padding:2px 6px;border-radius:6px}
+.setting{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:20px 22px;margin:0 0 16px}
+.setting h3{margin:0 0 6px;font-size:1.2rem}
+.setting select{min-width:min(100%,420px)}
+#batch{position:fixed;left:var(--side-w);right:0;bottom:0;z-index:7;background:rgba(15,15,19,.97);border-top:1px solid var(--line2);
+  padding:14px 44px;display:none}
+#batch .inner{max-width:1180px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#toast{position:fixed;left:50%;top:24px;transform:translateX(-50%);background:#22222b;border:1px solid var(--line2);
+  border-radius:var(--r2);padding:14px 20px;z-index:30;display:none;max-width:90vw;font-weight:600}
+/* guide */
+#guide{position:fixed;left:0;right:0;bottom:0;z-index:20;display:none;padding:0 12px calc(12px + env(safe-area-inset-bottom))}
+#guide .sheet{max-width:640px;margin:0 auto;background:#17171f;border:1px solid rgba(26,140,255,.45);border-radius:20px;
+  box-shadow:0 10px 50px rgba(0,0,0,.7);padding:22px 24px;max-height:56vh;overflow:auto}
+#guide .step{font-size:.8rem;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px}
+#guide h3{margin:6px 0 8px;font-size:1.45rem;line-height:1.2}
+#guide p{margin:8px 0;font-size:1rem;color:var(--body)}
+#guide ul{margin:8px 0;padding-left:22px;font-size:1rem;color:var(--body)}
+#guide li{margin:6px 0}
+#guide b{color:var(--text)}
+#guide .live{margin:12px 0;padding:12px 14px;border-radius:var(--r2);background:#0c0c11;border:1px solid var(--line);font-size:1rem;color:var(--body)}
+#guide .live:empty{display:none}
+#guide .dots{display:flex;gap:6px;margin:14px 0 4px}
+#guide .dots i{width:9px;height:9px;border-radius:50%;background:rgba(255,255,255,.15)}
+#guide .dots i.on{background:var(--accent)}
+#guide .nav2{display:flex;gap:10px;align-items:center;margin-top:12px}
+.guide-hi{outline:3px solid var(--accent)!important;outline-offset:4px;border-radius:var(--r)}
+body.guiding main{padding-bottom:62vh}
+body.guiding #batch{display:none!important}
+@media (min-width:1200px){
+  #guide{left:auto;right:28px;bottom:28px;top:auto;width:460px;padding:0}
+  #guide .sheet{max-height:calc(100vh - 56px)}
+  body.guiding main{padding-right:520px;padding-bottom:140px}
+}
+.topbar{display:none;align-items:center;gap:10px;margin-bottom:16px}
+.topbar .logo{width:36px;height:36px;font-size:.9rem;border-radius:11px}
+.topbar b{font-size:1.05rem}
+/* phones: bottom tab bar */
+@media (max-width:899px){
+  .nav{top:auto;right:0;width:auto;height:auto;flex-direction:row;padding:6px 6px calc(6px + env(safe-area-inset-bottom));border-right:0;border-top:1px solid var(--line2)}
+  .brand,.nav-foot{display:none}
+  .nav nav{flex-direction:row;width:100%;gap:2px}
+  .nav-item{flex:1;flex-direction:column;gap:3px;padding:6px 2px;font-size:.68rem;min-height:56px;text-align:center;position:relative}
+  .nav-item .lbl-long{display:none}
+  .nbadge{position:absolute;top:2px;right:6px;margin:0;font-size:.65rem;padding:1px 6px;min-width:0}
+  main{margin-left:0;padding:16px 16px 120px}
+  .topbar{display:flex}
+  .vhead h1{font-size:1.6rem}
+  #batch{left:0;bottom:70px;padding:10px 16px}
+  #guide{bottom:72px}
+  body.guiding main{padding-bottom:70vh}
+}
+</style>
+</head>
+<body>
+<div class="app">
+<aside class="nav">
+  <div class="brand"><div class="logo">GL</div><div><b>Game Library</b><span>Manager</span></div></div>
+  <nav>
+    <button class="nav-item" data-view="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>Overview</span></button>
+    <button class="nav-item" data-view="attention"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17.5v.5"/></svg><span>Needs <span class="lbl-long">attention</span></span><span id="navAttn" class="nbadge"></span></button>
+    <button class="nav-item" data-view="library"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="16" rx="1"/><path d="m17 5 4 1-3 14-4-1z"/></svg><span>Library</span><span id="navLib" class="nbadge"></span></button>
+    <button class="nav-item" data-view="queue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h10"/></svg><span>Queue</span><span id="navQ" class="nbadge"></span></button>
+    <button class="nav-item" data-view="savefix"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v6h8V3M8 21v-7h8v7"/></svg><span>Save fix</span><span id="navSf" class="nbadge"></span></button>
+    <button class="nav-item" data-view="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9 7 7M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></svg><span>Settings</span></button>
+  </nav>
+  <div class="nav-foot">
+    <span id="smpPill" class="pill">ShadowMount …</span>
+    <button id="guideBtn" class="small">Show the guide</button>
+    <div class="ver" id="verTxt"></div>
+  </div>
+</aside>
+
+<main>
+  <div class="topbar"><div class="logo">GL</div><b>Game Library Manager</b><span class="spacer"></span><button id="guideBtn2" class="small">Guide</button></div>
+  <div id="smpBanner"></div>
+
+  <section class="view" data-view="home" id="homeSec">
+    <div class="vhead"><div><h1>Overview</h1><p>Your games across every drive, and anything ShadowMount Plus can't see yet.</p></div>
+      <div class="actions"><button id="scanBtn" class="primary">Rescan drives</button></div></div>
+    <div class="stat-grid" id="homeStats"></div>
+    <h2 class="sub">Drives</h2>
+    <div id="driveSec"><div id="drives" class="drives"></div></div>
+  </section>
+
+  <section class="view" data-view="attention" id="probSec" hidden>
+    <div class="vhead"><div><h1>Needs attention <span id="pCount" class="count">0</span></h1>
+      <p>Games ShadowMount won't pick up, why, and where they should go. Nothing moves until you press a button.</p></div>
+      <div class="actions"><button id="fixAllBtn" class="primary" disabled>Fix all</button></div></div>
+    <div id="problems"><div class="empty">Scanning…</div></div>
+  </section>
+
+  <section class="view" data-view="library" id="libSec" hidden>
+    <div class="vhead"><div><h1>Library <span id="lCount" class="count">0</span></h1>
+      <p>Every game on every drive. Tick games, pick a drive in the bar at the bottom, then press Move.</p></div></div>
+    <div id="library"></div>
+  </section>
+
+  <section class="view" data-view="queue" id="queueSec" hidden>
+    <div class="vhead"><div><h1>Queue <span id="qCount" class="count">0</span></h1>
+      <p>Moves, fixes and extractions run here one at a time in the background. You can close this page.</p></div>
+      <div class="actions"><button id="pauseBtn" class="small">Pause</button><button id="stopBtn" class="small danger">Stop batch</button><button id="clearBtn" class="small">Clear finished</button></div></div>
+    <div id="queue"><div class="empty">Nothing queued.</div></div>
+  </section>
+
+  <section class="view" data-view="savefix" id="saveSec" hidden>
+    <div class="vhead"><div><h1>Save fix <span id="sfCount" class="count">0</span></h1>
+      <p>For backported games that won't save.</p></div>
+      <div class="actions"><button id="sfAllBtn" class="primary" disabled>Apply to all</button></div></div>
+    <div id="fakelib"></div>
+  </section>
+
+  <section class="view" data-view="settings" id="setSec" hidden>
+    <div class="vhead"><div><h1>Settings</h1><p>ShadowMount's scan depth, the home-screen tile and phone notifications.</p></div></div>
+    <div class="setting" id="depthLbl"><h3>ShadowMount scan depth</h3>
+      <div class="explain">How many folder levels ShadowMount looks into. This is saved in ShadowMount's own settings, and Needs attention follows it.</div>
+      <select id="depthSel"><option value="1">1 – only games directly inside homebrew</option><option value="2">2 – also one subfolder deeper</option></select></div>
+    <div class="setting" id="tileSec"><h3>Home tile</h3><div id="tile"></div></div>
+    <div class="setting" id="pushSec"><h3>Notifications</h3><div id="push"></div></div>
+  </section>
+</main>
+</div>
+
+<div id="batch"><div class="inner">
+  <b id="selCount">0 selected</b>
+  <select id="dest"></select>
+  <button id="moveBtn" class="primary">Move</button>
+  <button id="copyBtn">Copy</button>
+  <button id="selNone" class="small">Clear</button>
+</div></div>
+<div id="toast"></div>
+<div id="guide" role="dialog" aria-labelledby="gTitle"><div class="sheet">
+  <div class="step" id="gStep"></div>
+  <h3 id="gTitle"></h3>
+  <div id="gBody"></div>
+  <div class="live" id="gLive"></div>
+  <div class="dots" id="gDots"></div>
+  <div class="nav2"><button id="gSkip" class="small">Skip guide</button><span class="spacer"></span>
+    <button id="gBack" class="small">Back</button><button id="gNext" class="primary">Next</button></div>
+</div></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const sel = new Set();
+let state = null, lastProg = {}, speeds = {};
+
+function fmtBytes(b){ if(!b) return "0 B"; const u=["B","KB","MB","GB","TB"]; let i=0; while(b>=1024&&i<4){b/=1024;i++} return (i?b.toFixed(1):b)+" "+u[i]; }
+function fmtTime(s){ s=Math.max(0,Math.round(s)); const h=Math.floor(s/3600), m=Math.floor(s%3600/60), x=s%60;
+  if(h) return h+" hours "+m+" minutes"; if(m) return m+" minutes "+x+" seconds"; return x+" seconds"; }
+function toast(msg){ const t=$("#toast"); t.textContent=msg; t.style.display="block"; clearTimeout(toast.t); toast.t=setTimeout(()=>t.style.display="none",3500); }
+
+async function post(path){
+  try{ const r = await fetch(path,{method:"POST"}); const j = await r.json(); toast(j.message||"OK"); refresh(); return j.ok; }
+  catch(e){ toast("Couldn't reach the PS5"); return false; }
+}
+
+function gsize(g){ return g.size_state===0? 'measuring…' : (g.size_state===2? '≥ ':'')+fmtBytes(g.size); }
+function gameName(g){ return g.title || g.title_id || g.path.split("/").pop(); }
+function driveLabel(m){ const d=(state?.scan.drives||[]).find(x=>x.mount===m); return d? d.label+" ("+m+")" : m; }
+
+function renderHeader(s){
+  const p=$("#smpPill");
+  const st=s.scan.smp_status;
+  const labels={ok:"ShadowMount "+(s.scan.smp_version||"")+" connected", not_installed:"SMP not installed", api_disabled:"SMP API switched off",
+    no_api:"SMP not found / older than 1.7", too_old:"SMP "+(s.scan.smp_version||"")+" too old", missing_features:"SMP needs updating"};
+  p.className="pill "+(st==="ok"?"ok":(st==="not_installed"||st==="too_old")?"bad":"warn");
+  p.textContent=labels[st]||"SMP …";
+  const ban=$("#smpBanner");
+  if(st && st!=="ok"){
+    ban.innerHTML=`<div class="banner ${st==="not_installed"||st==="too_old"?"bad":"warn"}"><span class="head">${esc(labels[st])}</span>${esc(s.scan.smp_message)}
+      <div style="margin-top:6px">Game Library Manager needs <b>ShadowMount Plus 1.7 or newer</b> for the "does SMP see it?" checks. Finding, fixing and moving games still work.</div></div>`;
+  } else ban.innerHTML="";
+  const ds=$("#depthSel"); if(document.activeElement!==ds) ds.value=String(s.scan.depth);
+  $("#scanBtn").textContent = s.scan.running ? "Scanning…" : s.scan.sizing ? "Measuring sizes…" : "Rescan drives";
+  $("#verTxt").textContent = "Version "+s.version;
+  const probs=s.scan.games.filter(g=>g.issue!=="ok").length, act=s.queue.jobs.filter(j=>j.state==="queued"||j.state==="running").length,
+        sfn=s.scan.games.filter(g=>g.savefix===1).length;
+  $("#navAttn").textContent=probs||""; $("#navAttn").className="nbadge"+(probs?" warn":"");
+  $("#navLib").textContent=s.scan.games.filter(g=>g.issue==="ok").length||"";
+  $("#navQ").textContent=act||""; $("#navQ").className="nbadge"+(act?" live":"");
+  $("#navSf").textContent=sfn||""; $("#navSf").className="nbadge"+(sfn?" warn":"");
+  renderHome(s);
+  $("#scanBtn").disabled = s.scan.running;
+}
+
+function renderHome(s){
+  const sc=s.scan, st=sc.smp_status, probs=sc.games.filter(g=>g.issue!=="ok"), ok=sc.games.filter(g=>g.issue==="ok"),
+        seen=ok.filter(g=>g.smp_sees).length, run=s.queue.jobs.find(j=>j.state==="running"), wait=s.queue.jobs.filter(j=>j.state==="queued").length;
+  const card=(view,lab,big,note,cls="")=>`<button class="stat" data-go="${view}"><span class="lab">${lab}</span><span class="big ${cls}">${big}</span><span class="note">${note}</span></button>`;
+  const smpTxt={ok:["✓","Connected · version "+esc(sc.smp_version)],not_installed:["✗","Not installed"],api_disabled:["!","API switched off"],
+    no_api:["!","Not running, or older than 1.7"],too_old:["✗","Version "+esc(sc.smp_version)+" is too old"],missing_features:["!","Needs updating"]}[st]||["…","Checking"];
+  $("#homeStats").innerHTML=
+    card("settings","ShadowMount Plus",smpTxt[0],smpTxt[1],st==="ok"?"st-ok":st==="not_installed"||st==="too_old"?"st-bad":"st-warn")+
+    card("attention","Needs attention",probs.length,probs.length? `${probs.filter(g=>g.fix_dst).length} with a one-tap fix` : "Everything is in place",probs.length?"st-warn":"st-ok")+
+    card("library","Library",ok.length,sc.smp_api? `${seen} seen by ShadowMount` : "games in the right place")+
+    card("queue","Queue",run? Math.floor(run.bytes_total? run.bytes_done/run.bytes_total*100:0)+"%" : wait,
+      run? esc(jobName(run))+(wait?` · ${wait} waiting`:"") : wait? "jobs waiting" : "Nothing running",run?"st-ok":"");
+  document.querySelectorAll("#homeStats [data-go]").forEach(b=>b.onclick=()=>showView(b.dataset.go));
+}
+function jobName(j){ const g=(state?.scan.games||[]).find(x=>x.title_id===j.title_id && x.title); return g? g.title : (j.title||j.title_id); }
+
+function renderDrives(s){
+  $("#drives").innerHTML = s.scan.drives.map(d=>{
+    const used = d.total? (1-d.avail/d.total)*100 : 0;
+    return `<div class="drive"><div class="title">${esc(d.label)}</div><div class="path">${esc(d.mount)}</div>
+      <div class="bar"><i style="width:${used.toFixed(1)}%"></i></div>
+      <div class="stats"><span><b>${fmtBytes(d.avail)}</b> free</span><span>of ${fmtBytes(d.total)}</span></div></div>`;
+  }).join("") || '<div class="empty">No drives found.</div>';
+  const dest=$("#dest"), cur=dest.value;
+  dest.innerHTML = s.scan.drives.filter(d=>d.root).map(d=>`<option value="${esc(d.root)}">→ ${esc(d.label)} (${esc(d.root)})</option>`).join("");
+  if(cur) dest.value=cur;
+}
+
+function renderQueue(s){
+  const jobs=s.queue.jobs; const active=jobs.filter(j=>j.state==="queued"||j.state==="running");
+  $("#qCount").textContent=active.length;
+  $("#pauseBtn").textContent = s.queue.paused ? "Resume" : "Pause";
+  if(!jobs.length){ $("#queue").innerHTML='<div class="empty">Nothing queued. Tick games in the Library, or press Fix in Needs attention.</div>'; return; }
+  const order={running:0,queued:1,failed:2,cancelled:3,done:4};
+  const sorted=[...jobs].sort((a,b)=> order[a.state]-order[b.state] || (a.state==="queued"?0:b.finished_ms-a.finished_ms));
+  $("#queue").innerHTML = sorted.map(j=>{
+    const verb = {fix:"Fix",move:"Move",copy:"Copy",extract:"Extract"}[j.type];
+    let extra="";
+    if(j.state==="running"){
+      const pct = j.bytes_total? j.bytes_done/j.bytes_total*100 : 0;
+      const prev=lastProg[j.id], now=Date.now();
+      if(prev && now>prev.t){ const inst=(j.bytes_done-prev.b)/((now-prev.t)/1000); speeds[j.id]= speeds[j.id]==null? inst : speeds[j.id]*0.7+inst*0.3; }
+      lastProg[j.id]={b:j.bytes_done,t:now};
+      const sp=speeds[j.id]||0, eta= sp>0? (j.bytes_total-j.bytes_done)/sp : 0;
+      extra=`<div class="bar"><i style="width:${pct.toFixed(1)}%"></i></div>
+        <div class="stats"><span><b>${pct.toFixed(1)}%</b></span><span><b>${fmtBytes(j.bytes_done)}</b> / ${fmtBytes(j.bytes_total)}</span>
+        <span>files <b>${j.files_done}</b> / ${j.files_total}</span><span><b>${fmtBytes(sp)}/s</b></span>
+        ${eta? `<span>about <b>${fmtTime(eta)}</b> left</span>`:""}<span>${esc(j.phase)}</span></div>
+        <div class="row" style="margin-top:6px"><button class="small danger" onclick="post('/api/cancel?id=${j.id}')">Cancel</button></div>`;
+    } else if(j.state==="queued"){
+      extra=`<div class="row" style="margin-top:6px"><button class="small" onclick="post('/api/up?id=${j.id}')">↑ Earlier</button>
+        <button class="small danger" onclick="post('/api/cancel?id=${j.id}')">Remove</button>${j.message?`<span class="detail">${esc(j.message)}</span>`:""}</div>`;
+    } else {
+      const cls = j.state==="done"?"job-done":"job-fail";
+      const icon= j.state==="done"?"✓":"✗";
+      const nowSeen = j.state==="done" && (s.scan.games||[]).some(g=>g.path===j.dst && g.smp_sees);
+      const ver = nowSeen && !/sees it/.test(j.verify||"") ? '<div class="detail st-ok">✓ ShadowMount sees it now</div>'
+                : j.verify? `<div class="detail">${/sees it/.test(j.verify)?"✓":"⚠"} ${esc(j.verify)}</div>` : "";
+      extra=`<div class="detail ${cls}">${icon} ${esc(j.message)}</div>${ver}`;
+    }
+    return `<div class="card"><div class="row"><span class="badge">${verb}</span><span class="title">${esc(jobName(j))}</span>
+      <span class="tid">${esc(j.title_id)}</span><span class="spacer"></span><span class="pill">${j.state}</span></div>
+      <div class="path">${esc(j.src)}</div><div class="arrow">→ ${esc(j.dst)}</div>${extra}</div>`;
+  }).join("");
+}
+
+function renderProblems(s){
+  const probs=s.scan.games.filter(g=>g.issue!=="ok");
+  $("#pCount").textContent=probs.length;
+  $("#fixAllBtn").disabled = !probs.some(g=>g.fix_dst);
+  if(!probs.length){ $("#problems").innerHTML = s.scan.running? '<div class="empty">Scanning…</div>' : '<div class="empty st-ok">✓ Everything is where ShadowMount expects it.</div>'; return; }
+  $("#problems").innerHTML = probs.map(g=>`<div class="card">
+    <div class="row"><span class="badge">${esc(g.kind)}</span><span class="title">${esc(gameName(g))}</span><span class="tid">${esc(g.title_id)}</span>
+      <span class="spacer"></span><span class="tid">${gsize(g)}</span></div>
+    <div class="path">${esc(g.path)}</div>
+    <div class="detail st-warn">${esc(g.detail)}</div>
+    ${g.fix_dst? `<div class="arrow">→ ${esc(g.fix_dst)}</div>`:""}
+    <div class="row" style="margin-top:6px">
+      ${g.fix_dst? `<button class="small primary" onclick="post('/api/job?action=fix&id=${g.id}')">Fix (move here)</button>`:""}
+      ${s.scan.smp_api && (g.issue==="too_deep"||g.issue==="outside_roots"||g.issue==="wrapped_folder")? `<button class="small" onclick="post('/api/manual?id=${g.id}')">Leave it, add to SMP list</button>`:""}
+      ${g.kind==="archive"? `<button class="small primary" onclick="openArchive(${g.id})">Extract…</button>`:""}
+      ${g.kind==="pkg"? `<button class="small" onclick="inspectPkg(${g.id})">Check if convertible</button>`:""}
+    </div><div id="ax-${g.id}"></div></div>`).join("");
+}
+
+const DRV_ORDER={"/data":0,"/mnt/ext1":1,"/mnt/ext0":2};
+function driveAdvice(d,kind,need){
+  const internal=d.mount==="/data", m2=d.mount==="/mnt/ext1", usb=d.mount.startsWith("/mnt/usb")||d.mount==="/mnt/ext0";
+  let rank=internal?0:m2?1:2, note;
+  if(kind==="folder") note= internal? "Fastest for folder games: thousands of small files load quickest here."
+                       : m2? "Very good: fast NVMe, slightly behind internal for small-file loading."
+                       : "Works, but slowest: small-file reads over USB mean longer loads and slow moves.";
+  else if(kind==="pfs"||kind==="pfsc") note= internal? "Best: PFS images are experimental in ShadowMount; internal is the safest place."
+                       : "Works, but PFS images are experimental; internal is safer.";
+  else note= internal? "Best: ShadowMount's optimised image mode only applies to images on the internal drive."
+             : m2? "Good: standard image mode. One big file, so it copies at full speed."
+             : "OK: one big file is fine over USB, though loading is slower than NVMe.";
+  const fits=d.avail>=need;
+  return {rank:fits?rank:9,fits,note};
+}
+const PKG_VERDICT={
+  convertible:["st-ok","Convertible: the game data isn't compressed. The converter isn't built yet, but this one will work."],
+  convertible_zlib:["st-ok","Convertible: zlib-compressed game data. The converter isn't built yet, but this one will work."],
+  needs_kraken:["st-warn","Kraken-compressed game data. Converting needs a Kraken decoder on the console, which is the next thing to build."],
+  unknown_inner:["st-warn","Unlocked, but the game data is in a layout Game Library Manager doesn't recognise yet."],
+  locked:["st-bad","Not convertible: it isn't locked with the standard fake-package passcode. Install it, or get the game as a folder, exFAT image or 7z instead."],
+  retail:["st-bad","Retail-signed package: it can only be installed, not converted."],
+  unknown:["st-bad","Couldn't read this package."]};
+async function inspectPkg(id){
+  const box=$("#ax-"+id); box.innerHTML='<div class="detail">Reading the package header…</div>';
+  let a; try{ a=await fetch("/api/pkginfo?id="+id).then(r=>r.json()); }catch(e){ box.innerHTML='<div class="detail st-bad">Couldn\'t read the package.</div>'; return; }
+  const v=PKG_VERDICT[a.verdict]||PKG_VERDICT.unknown;
+  let h=`<div class="card" style="background:var(--bg)"><div class="detail ${v[0]}"><b>${esc(v[1])}</b></div>`;
+  if(a.summary) h+=`<div class="explain">${esc(a.summary)}</div>`;
+  if(a.error) h+=`<div class="explain">${esc(a.error)}</div>`;
+  if(a.content_id) h+=`<div class="explain">Content ID <code>${esc(a.content_id)}</code>${a.outer&&a.outer.key&&a.outer.key!=="none"?` · key ${esc(a.outer.key)}`:""}${a.inner&&a.inner.naps_files>0?` · ${a.inner.naps_files} files inside`:""}${a.inner&&a.inner.logical?` · ${fmtBytes(a.inner.logical)} unpacked`:""}</div>`;
+  box.innerHTML=h+"</div>";
+}
+async function openArchive(id){
+  const box=$("#ax-"+id); box.innerHTML='<div class="detail">Reading archive…</div>';
+  let a; try{ a=await fetch("/api/archive?id="+id).then(r=>r.json()); }catch(e){ box.innerHTML='<div class="detail st-bad">Couldn\'t read the archive.</div>'; return; }
+  if(!a.ok){ box.innerHTML=`<div class="detail st-bad">${esc(a.message)}</div>`; return; }
+  if(!a.candidates.length){ box.innerHTML=`<div class="detail st-warn">No game found inside (no sce_sys/param.json + eboot.bin, and no .exfat/.ffpkg/.ffpfs image). ${a.files} files, ${fmtBytes(a.unpacked)}.</div>`; return; }
+  const speed = !a.supported? `<span class="st-bad">Uses ${esc(a.methods)} – not supported here; extract it on a PC.</span>`
+    : /store/.test(a.methods)&&!/LZMA/.test(a.methods)? "Stored without compression: extraction runs at disk speed."
+    : a.multithread? "LZMA2: decoded on several CPU cores when the archive was made with multi-threaded 7-Zip."
+    : "LZMA: single-core decoding, so this one is slower.";
+  let h=`<div class="card" style="background:var(--bg)"><div class="detail"><b>${a.volumes>1?a.volumes+" volumes, ":""}${fmtBytes(a.archive_size)}</b> archive · ${a.files} files · ${fmtBytes(a.unpacked)} unpacked · ${esc(a.methods)}</div><div class="explain">${speed}</div>`;
+  const exSize=(a.extras||[]).reduce((n,e)=>n+e.size,0);
+  const sibSize=(a.siblings||[]).reduce((n,e)=>n+e.size,0);
+  a.candidates.forEach((c,ci)=>{
+    const need=(c.size+exSize+sibSize)*1.02+256*2**20;
+    const drives=state.scan.drives.filter(d=>d.root).map(d=>({d,...driveAdvice(d,c.kind,need)})).sort((x,y)=>x.rank-y.rank);
+    const best=drives.find(x=>x.fits);
+    h+=`<div class="detail" style="margin-top:8px"><b>Found:</b> ${c.kind==="folder"?"folder game":esc(c.kind)+" image"} <code>${esc(c.inner||"(archive root)")}</code> · ${c.files} files · ${fmtBytes(c.size)}<br>
+      Extracts to <code>&lt;drive&gt;/homebrew/${esc(c.name)}</code>${c.kind==="folder"&&c.inner?" (the wrapper folders are dropped, so ShadowMount sees it straight away)":""}.</div>`;
+    h+=drives.map((x,i)=>`<label class="lib-item" style="padding:6px 0"><input type="radio" name="axd-${id}-${ci}" value="${esc(x.d.root)}" ${x===best?"checked":""} ${x.fits?"":"disabled"}>
+      <div class="grow"><div class="row"><span class="title">${esc(x.d.label)}</span>${x===best?'<span class="badge" style="color:var(--ok);border-color:#23472c">recommended</span>':""}
+      <span class="tid">${fmtBytes(x.d.avail)} free</span></div><div class="explain" style="margin:0">${x.fits?esc(x.note):'<span class="st-bad">Not enough free space</span>'}</div></div></label>`).join("");
+    if((a.extras||[]).length){
+      h+=`<label class="row" style="margin:6px 0;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="axex-${id}-${ci}" checked>
+        <span class="detail">Also extract everything else (${fmtBytes(exSize)}) to <code>&lt;drive&gt;/game-extras/${esc(c.name)}</code>:
+        <span style="color:var(--dim)">${a.extras.map(e=>esc(e.path)+" ("+fmtBytes(e.size)+")").join(", ")}</span><br>
+        <span style="color:var(--dim)">Fixes, backports and DLC are kept with their original folder names, outside ShadowMount's scan folders.</span></span></label>`;
+    }
+    if((a.siblings||[]).length){
+      h+=`<label class="row" style="margin:6px 0;flex-wrap:nowrap;align-items:flex-start"><input type="checkbox" id="axsib-${id}-${ci}" checked>
+        <span class="detail">Also copy the other items next to the archive (${fmtBytes(sibSize)}) to <code>&lt;drive&gt;/game-extras/${esc(c.name)}</code>:
+        <span style="color:var(--dim)">${a.siblings.map(e=>esc(e.path)+" ("+fmtBytes(e.size)+")").join(", ")}</span></span></label>`;
+    }
+    h+=`<label class="row" style="margin:6px 0;flex-wrap:nowrap"><input type="checkbox" id="axdel-${id}-${ci}"> <span class="detail">Delete the archive afterwards (only if every file passes its CRC check)</span></label>
+      <button class="small primary" ${best&&a.supported?"":"disabled"} onclick="startExtract(${id},${ci})">Extract to selected drive</button>`;
+  });
+  box.innerHTML=h+"</div>"; box._a=a;
+}
+async function startExtract(id,ci){
+  const a=$("#ax-"+id)._a, c=a.candidates[ci];
+  const r=document.querySelector(`input[name="axd-${id}-${ci}"]:checked`); if(!r){ toast("Pick a drive"); return; }
+  const del=$(`#axdel-${id}-${ci}`).checked?1:0;
+  const exb=$(`#axex-${id}-${ci}`); const ex=exb? (exb.checked?1:0) : 0;
+  const sb=$(`#axsib-${id}-${ci}`); const sib=sb? (sb.checked?1:0) : 0;
+  const ok=await post(`/api/extract?id=${id}&inner=${encodeURIComponent(c.inner)}&name=${encodeURIComponent(c.name)}&root=${encodeURIComponent(r.value)}&delete=${del}&extras=${ex}&siblings=${sib}`);
+  if(ok) $("#ax-"+id).innerHTML='<div class="detail st-ok">Queued. You can follow it in the Queue.</div>';
+}
+
+function renderLibrary(s){
+  const games=s.scan.games; $("#lCount").textContent=games.length;
+  if(!games.length){ $("#library").innerHTML='<div class="empty">'+(s.scan.running?"Scanning…":"No games found.")+'</div>'; return; }
+  const byDrive={};
+  games.forEach(g=>(byDrive[g.drive]=byDrive[g.drive]||[]).push(g));
+  $("#library").innerHTML = Object.keys(byDrive).map(d=>{
+    const list=byDrive[d].sort((a,b)=>gameName(a).localeCompare(gameName(b)));
+    const total=list.reduce((n,g)=>n+g.size,0);
+    return `<div class="drive-head">${esc(driveLabel(d))} · ${list.length} item${list.length===1?"":"s"}, ${fmtBytes(total)}</div><div class="libcard">`+
+      list.map(g=>{
+        let st;
+        if(g.issue!=="ok") st=`<span class="st-bad">✗ ${esc(g.issue.replace(/_/g," "))}</span>`;
+        else if(!s.scan.smp_api) st=`<span class="st-ok">✓ in the right place</span>`;
+        else if(g.smp_sees) st=`<span class="st-ok">✓ ShadowMount sees it${g.mounted?" (mounted)":""}</span>`;
+        else st=`<span class="st-warn">⚠ In the right place, but ShadowMount hasn't registered it yet</span>`;
+        return `<label class="lib-item"><input type="checkbox" data-id="${g.id}" ${sel.has(g.id)?"checked":""}>
+          <div class="grow"><div class="row"><span class="title">${esc(gameName(g))}</span><span class="tid">${esc(g.title_id)}</span>
+          <span class="badge">${esc(g.kind)}</span></div>
+          <div class="path">${esc(g.path)}</div>
+          <div class="stats"><span>${gsize(g)}</span>${g.kind==="folder"&&g.size_state?`<span>${g.files} files</span>`:""}<span>${st}</span>
+          ${g.savefix===1?'<span class="st-warn">save fix available</span>':g.savefix===2?'<span class="st-ok">save fix on</span>':g.has_fakelib?'<span>has fakelib</span>':""}</div></div></label>`;
+      }).join("")+"</div>";
+  }).join("");
+  document.querySelectorAll("#library input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
+    const id=+cb.dataset.id; cb.checked? sel.add(id) : sel.delete(id); renderBatch();
+  });
+}
+
+function renderFakelib(s){
+  const withFl=s.scan.games.filter(g=>g.has_fakelib);
+  const need=withFl.filter(g=>g.savefix===1).length;
+  $("#sfCount").textContent=need;
+  $("#sfAllBtn").disabled=!need;
+  $("#sfAllBtn").textContent= need? `Apply to all (${need})` : "Apply to all";
+  let h=`<div class="explain">Some backports ship their own copy of the PS5 save library (<code>libSceSaveData.sprx</code>) in the game's <code>fakelib</code> folder,
+    which can stop saving from working. The <b>save fix</b> switches that one file off by renaming it to <code>.disabled</code>, so the
+    console's own save library is used instead. Nothing is deleted, <b>Undo</b> puts it back, and it takes effect the next time the game starts.
+    If a game then fails to boot, undo it for that game.</div>`;
+  const gs=s.global_savefix ?? s.scan.global_savefix;
+  if(gs){
+    h+=`<div class="card"><div class="title">Global fakelib <span class="tid">/data/shadowmount/fakelib</span></div>
+      <div class="detail st-warn">Applies to <b>every</b> game. ${gs===1?"Contains a save library.":"Save fix is on."}</div>
+      <button class="small ${gs===1?"primary":""}" onclick="post('/api/savefix?id=global${gs===2?"&undo=1":""}')">${gs===1?"Apply save fix (all games)":"Undo"}</button></div>`;
+  }
+  if(!withFl.length) h+='<div class="empty">No games have a fakelib folder, so there is nothing to fix.</div>';
+  h+=withFl.sort((a,b)=>b.savefix-a.savefix).map(g=>{
+    const files=g.fakelib? g.fakelib.split(", ").filter(Boolean):[];
+    const state= g.savefix===1? `<span class="fixstate st-warn">⚠ Save library active — save fix available</span>`
+               : g.savefix===2? `<span class="fixstate st-ok">✓ Save fix on</span>`
+               : `<span class="fixstate" style="color:var(--dim)">No save library in this fakelib — save fix not needed</span>`;
+    const btn= g.savefix===1? `<button class="small primary" onclick="post('/api/savefix?id=${g.id}')">Apply save fix</button>`
+             : g.savefix===2? `<button class="small" onclick="post('/api/savefix?id=${g.id}&undo=1')">Undo save fix</button>` : "";
+    return `<div class="card"><div class="row"><span class="title">${esc(gameName(g))}</span><span class="tid">${esc(g.title_id)}</span></div>
+      <div class="row" style="margin:4px 0">${state}<span class="spacer"></span>${btn}</div>
+      <details><summary>Advanced: individual fakelib files (${files.length})</summary>
+      <div class="explain">Tap a file to switch it off (rename to .disabled) or back on. Only change these if you know what they do.</div>
+      <div class="row">${files.map(f=>{
+        const off=/\.disabled$/i.test(f);
+        return `<button class="small flbtn" data-id="${g.id}" data-file="${esc(f)}">${off?"↺ ":"⨯ "}${esc(f)}</button>`;
+      }).join("")}</div></details></div>`;
+  }).join("");
+  $("#fakelib").innerHTML=h;
+  document.querySelectorAll("#fakelib .flbtn").forEach(b=>b.onclick=()=>
+    post(`/api/fakelib?id=${b.dataset.id}&file=${encodeURIComponent(b.dataset.file)}`));
+}
+
+function renderPush(s){
+  const on=s.push.ntfy||s.push.webhook;
+  $("#push").innerHTML = `<div class="detail">PS5 pop-ups: <span class="st-ok">on</span> · Phone push:
+    ${on? `<span class="st-ok">${[s.push.ntfy&&"ntfy",s.push.webhook&&"webhook"].filter(Boolean).join(" + ")}</span>`:'<span class="st-warn">not set up</span>'}</div>
+    ${on? `<button class="small" onclick="post('/api/testpush')">Send test push</button>`:
+    `<div class="detail" style="color:var(--dim)">Install the free <b>ntfy</b> app, subscribe to a hard-to-guess topic, then add
+     <code>ntfy_url=https://ntfy.sh/your-topic</code> to <code>/data/game-library-manager/config.ini</code> and reload the payload.</div>`}`;
+}
+
+function renderTile(s){
+  const t=s.tile||{}; const st=t.state;
+  const look={installed:["st-ok","✓ On your home screen"],waiting_smp:["st-warn","⚠ Waiting for ShadowMount"],
+    error:["st-bad","✗ Couldn't install"],disabled:["","Switched off"],skipped:["st-ok","✓ Started from the tile"],unknown:["","Checking…"]}[st]||["",st];
+  $("#tile").innerHTML=`<div class="detail"><span class="fixstate ${look[0]}">${look[1]}</span> <span class="tid">${esc(t.title_id||"")}</span></div>
+    <div class="explain">${esc(t.message||"")}</div>
+    <div class="explain">The <b>Game Library Manager</b> tile opens this page in the PS5 browser, like the Payload Manager and Web File Manager tiles.
+    It never starts the app itself: your payload loader does that, after ShadowMount. If the app isn't running, the browser just can't connect.
+    The tile is a web link installed as <code>${esc(t.path||"/user/app/GLMG00001")}</code>.</div>
+    <button class="small" onclick="post('/api/tile')">${st==="installed"?"Reinstall tile":"Install tile now"}</button>`;
+}
+
+function renderBatch(){
+  $("#batch").style.display = sel.size && curView==="library"? "block":"none";
+  $("#selCount").textContent = sel.size+" selected";
+}
+
+async function queueSelected(action){
+  const root=$("#dest").value; if(!root){ toast("Pick a destination"); return; }
+  let ok=0, msgs=[];
+  for(const id of sel){
+    const r=await fetch(`/api/job?action=${action}&id=${id}&root=${encodeURIComponent(root)}`,{method:"POST"}).then(r=>r.json()).catch(()=>({ok:false,message:"network"}));
+    if(r.ok) ok++; else msgs.push(r.message);
+  }
+  sel.clear(); renderBatch();
+  toast(`${ok} queued`+(msgs.length? " · "+msgs[0]:""));
+  refresh();
+}
+
+async function refresh(){
+  try{
+    const s = await fetch("/api/state",{cache:"no-store"}).then(r=>r.json());
+    state=s;
+    renderHeader(s); renderDrives(s); renderQueue(s); renderTile(s);
+    const sig = s.scan.finished_ms+":"+s.scan.running+":"+s.scan.games.map(g=>g.size_state).join("");
+    if(sig!==refresh.sig){ refresh.sig=sig; renderProblems(s); renderLibrary(s); renderFakelib(s); renderPush(s); }
+    guideLive();
+    if(!guideAuto){ guideAuto=true; if(!s.guide_done) guideShow(0); }
+  }catch(e){ $("#smpPill").className="pill bad"; $("#smpPill").textContent="PS5 not responding"; }
+}
+
+/* ---------- views ---------- */
+let curView="home";
+function showView(v){
+  curView=v;
+  document.querySelectorAll(".view").forEach(e=>e.hidden=e.dataset.view!==v);
+  document.querySelectorAll(".nav-item").forEach(b=>b.classList.toggle("on",b.dataset.view===v));
+  window.scrollTo(0,0); renderBatch();
+  try{ sessionStorage.setItem("glmView",v); }catch(e){}
+}
+document.querySelectorAll(".nav-item").forEach(b=>b.onclick=()=>showView(b.dataset.view));
+try{ const v=sessionStorage.getItem("glmView"); showView(v&&document.querySelector(`.view[data-view="${v}"]`)?v:"home"); }catch(e){ showView("home"); }
+
+/* ---------- first-use guide ---------- */
+const SMP_HELP={
+  ok:s=>`<span class="st-ok">✓ ShadowMount Plus ${esc(s.scan.smp_version)} is running.</span> Every move will be checked against it, so you know the game shows up.`,
+  not_installed:()=>`<span class="st-bad">✗ ShadowMount Plus isn't installed</span> (no <code>/data/shadowmount</code> folder). Install and load it, then press Rescan. Finding and moving games still works without it.`,
+  api_disabled:()=>`<span class="st-warn">⚠ ShadowMount's API is switched off.</span> Set <code>api_enabled=1</code> in <code>/data/shadowmount/config.ini</code> so moved games can be checked.`,
+  no_api:()=>`<span class="st-warn">⚠ ShadowMount isn't answering.</span> It's either not loaded yet or older than 1.7. Load ShadowMount Plus 1.7 or newer, then press Rescan.`,
+  too_old:s=>`<span class="st-bad">✗ ShadowMount ${esc(s.scan.smp_version)} is too old.</span> Update to ShadowMount Plus 1.7 or newer.`,
+  missing_features:()=>`<span class="st-warn">⚠ This ShadowMount 1.7 build is missing a feature the checks use.</span> Update to the latest ShadowMount Plus.`};
+function phoneUrl(s){ return s.ip? `http://${s.ip}:${s.port}` : location.origin; }
+const GUIDE=[
+ {t:"Welcome to Game Library Manager", view:"home",
+  b:`<p>It finds games that ShadowMount Plus can't see, puts them where ShadowMount looks, and moves, copies or extracts games for you in a queue.</p>
+     <p>Everything runs on the PS5. This page, on the PS5 or your phone, is just a window onto it, so you can close it any time without stopping anything.</p>
+     <p>This guide takes about 2 minutes. <b>Nothing on your drives changes until you press a button.</b></p>`},
+ {t:"Is ShadowMount running?", view:"home", target:"#homeStats .stat",
+  b:`<p>The first card on the Overview shows whether ShadowMount Plus is connected. Load order matters: ShadowMount Plus first, then Game Library Manager. Your payload loader's autoload list can do this for you every boot.</p>`,
+  live:s=>SMP_HELP[s.scan.smp_status]?.(s)||"Checking…"},
+ {t:"Scan your drives", view:"home", target:"#homeStats", enter:"scan",
+  b:`<p>The app is now looking through the internal SSD, M.2 drive and any USB drives for games, 7z archives and .pkg files. It only reads; nothing is moved.</p>`,
+  live:s=>{ const sc=s.scan;
+    if(sc.running) return `<b>Scanning…</b> ${sc.dirs_seen} folders checked, ${sc.found} found so far<div class="path">${esc(sc.current)}</div>`;
+    const probs=sc.games.filter(g=>g.issue&&g.issue!=="ok").length;
+    return `<span class="st-ok">✓ Scan finished.</span> ${sc.games.length} item(s) on ${sc.drives.length} drive(s). ${probs? `<b>${probs}</b> need attention.`:"Nothing needs attention."}${sc.sizing?" Game sizes are still being measured in the background.":""}`; }},
+ {t:"Drives", view:"home", target:"#driveSec",
+  b:`<p>Every drive the app found, with its free space. Moves and extractions only offer drives with enough room.</p><p>Missing a drive? Plug it in, then press <b>Rescan drives</b> on the Overview.</p>`,
+  live:s=>s.scan.drives.map(d=>`${esc(d.label)} <span class="tid">${esc(d.mount)}</span>: <b>${fmtBytes(d.avail)}</b> free`).join("<br>")||"No drives found yet."},
+ {t:"Needs attention", view:"attention", target:"#problems",
+  b:`<p>Games ShadowMount won't pick up, with the reason and where they should go. The buttons you'll see:</p>
+     <ul><li><b>Fix (move here)</b>: moves it to the right spot. On the same drive this is instant.</li>
+     <li><b>Fix all</b>: queues every suggested fix in one go.</li>
+     <li><b>Extract…</b>: unpacks a 7z onto a drive you choose, with fixes, backports and DLC kept beside it.</li>
+     <li><b>Check if convertible</b>: reads a .pkg's header and tells you whether it can ever be converted.</li></ul>`,
+  live:s=>{ const p=s.scan.games.filter(g=>g.issue&&g.issue!=="ok"), f=p.filter(g=>g.fix_dst).length;
+    return p.length? `<b>${p.length}</b> item(s) here, <b>${f}</b> with a one-tap fix.` : `<span class="st-ok">✓ Nothing needs attention right now.</span>`; }},
+ {t:"Library", view:"library", target:"#library",
+  b:`<p>Every game on every drive, grouped by drive, with whether ShadowMount sees it.</p>
+     <p>To move games: tick them, pick a drive in the bar at the bottom, then press <b>Move</b>. <b>Copy</b> keeps the original, so you'd have two copies.</p>`,
+  live:s=>`<b>${s.scan.games.filter(g=>g.kind!=="archive"&&g.kind!=="pkg").length}</b> game(s) in your library.`},
+ {t:"Queue", view:"queue", target:"#queue",
+  b:`<p>Moves, fixes and extractions run here one at a time, in the background, with speed and time left. You get a PS5 pop-up as each one finishes.</p>
+     <ul><li><b>Pause</b> holds the queue after the current job.</li>
+     <li><b>Stop batch</b> stops the current job (its half-copy is deleted, the original stays) and cancels the rest. Games that already finished are never undone.</li></ul>`,
+  live:s=>{ const a=s.queue.jobs.filter(j=>j.state==="queued"||j.state==="running").length; return a? `<b>${a}</b> job(s) waiting or running.` : "The queue is empty."; }},
+ {t:"Save fix", view:"savefix", target:"#fakelib",
+  b:`<p>For backported games that won't save. The fix switches off the game's own copy of the save library so the console's is used instead.</p>
+     <p>Nothing is deleted, <b>Undo</b> reverses it, and it takes effect the next time the game starts.</p>`,
+  live:s=>{ const n=s.scan.games.filter(g=>g.savefix===1).length, on=s.scan.games.filter(g=>g.savefix===2).length;
+    return n? `<span class="st-warn"><b>${n}</b> game(s) could use the save fix.</span>${on?` ${on} already have it on.`:""}` : on? `<span class="st-ok">✓ ${on} game(s) have the save fix on.</span>` : "No games need it."; }},
+ {t:"ShadowMount scan depth", view:"settings", target:"#depthLbl",
+  b:`<p>This sets how deep ShadowMount looks for games, and writes it to ShadowMount's own settings.</p>
+     <ul><li><b>1</b>: only games directly inside <code>homebrew</code>.</li>
+     <li><b>2</b>: also one folder deeper, e.g. <code>homebrew/PS5/&lt;game&gt;</code>.</li></ul>
+     <p>Needs attention always follows this setting.</p>`,
+  live:s=>`Currently <b>${s.scan.depth}</b>.`},
+ {t:"Home tile and your phone", view:"settings", target:"#tileSec",
+  b:`<p>The <b>Game Library Manager</b> tile on your home screen opens this page in the PS5 browser. It never starts the app itself.</p>
+     <p>To use your phone instead, open the address below in its browser while it's on the same Wi-Fi. Both always show the same thing.</p>`,
+  live:s=>`Phone address: <b>${esc(phoneUrl(s))}</b><br>Tile: ${esc((s.tile&&s.tile.message)||"checking…")}`},
+ {t:"Phone notifications (optional)", view:"settings", target:"#pushSec",
+  b:`<p>For long batches you can get a push on your phone each time a job finishes, using the free <b>ntfy</b> app or a Home Assistant webhook. This section shows how to set it up.</p>`,
+  live:s=>(s.push.ntfy||s.push.webhook)? `<span class="st-ok">✓ Phone push is set up.</span>` : "Not set up. PS5 pop-ups still work."},
+ {t:"You're set", view:"attention", target:"#problems",
+  b:`<p>A good place to start is <b>Needs attention</b>, shown here.</p>
+     <p>Use the menu to move between sections. You can reopen this guide any time with <b>Show the guide</b> at the bottom of the menu.</p>`}
+];
+let gi=-1, guideAuto=false;
+function guideShow(i){
+  gi=Math.max(0,Math.min(GUIDE.length-1,i)); const st=GUIDE[gi];
+  document.body.classList.add("guiding"); $("#guide").style.display="block";
+  document.querySelectorAll(".guide-hi").forEach(e=>e.classList.remove("guide-hi"));
+  $("#gStep").textContent=`Step ${gi+1} of ${GUIDE.length}`;
+  $("#gTitle").textContent=st.t; $("#gBody").innerHTML=st.b;
+  $("#gDots").innerHTML=GUIDE.map((_,k)=>`<i class="${k<=gi?"on":""}"></i>`).join("");
+  $("#gBack").disabled=gi===0;
+  $("#gNext").textContent= gi===GUIDE.length-1? "Finish" : "Next";
+  $("#gSkip").style.visibility= gi===GUIDE.length-1? "hidden":"visible";
+  if(st.view && st.view!==curView) showView(st.view);
+  if(st.target){ const el=$(st.target); if(el){ el.classList.add("guide-hi");
+    const top=el.getBoundingClientRect().top+window.scrollY-24; window.scrollTo({top:Math.max(0,top-140),behavior:"smooth"}); } }
+  if(st.enter==="scan" && state && !state.scan.running && !GUIDE.scanned){ GUIDE.scanned=true; fetch("/api/scan",{method:"POST"}).then(()=>refresh()).catch(()=>{}); }
+  guideLive(); $("#gNext").focus();
+}
+function guideLive(){ if(gi<0||!state) return; const f=GUIDE[gi].live; $("#gLive").innerHTML= f? f(state) : ""; }
+function guideClose(done){
+  gi=-1; $("#guide").style.display="none"; document.body.classList.remove("guiding");
+  document.querySelectorAll(".guide-hi").forEach(e=>e.classList.remove("guide-hi"));
+  if(done) fetch("/api/guide?done=1",{method:"POST"}).catch(()=>{});
+}
+$("#gNext").onclick=()=>{ if(gi===GUIDE.length-1) guideClose(true); else guideShow(gi+1); };
+$("#gBack").onclick=()=>guideShow(gi-1);
+$("#gSkip").onclick=()=>guideClose(true);
+$("#guideBtn").onclick=$("#guideBtn2").onclick=()=>{ GUIDE.scanned=false; guideShow(0); };
+
+$("#scanBtn").onclick=()=>post("/api/scan");
+$("#depthSel").onchange=e=>{
+  const d=e.target.value;
+  if(confirm(`Set ShadowMount's scan depth to ${d}?\n\n${d==="2"?"ShadowMount will also look one folder deeper, e.g. homebrew/PS5/<game>. Games already in place are not affected.":"ShadowMount will only look directly inside each homebrew folder. Games kept one folder deeper will disappear from the home screen until moved."}\n\nThis edits /data/shadowmount/config.ini (other settings are kept).`))
+    post("/api/depth?depth="+d); else e.target.value=String(state.scan.depth);
+};
+$("#fixAllBtn").onclick=()=>{ if(confirm("Queue every suggested fix?")) post("/api/fixall"); };
+$("#pauseBtn").onclick=()=>post(state?.queue.paused? "/api/resume":"/api/pause");
+$("#clearBtn").onclick=()=>post("/api/clear");
+$("#stopBtn").onclick=()=>{
+  const jobs=state?.queue.jobs||[], run=jobs.filter(j=>j.state==="running").length, wait=jobs.filter(j=>j.state==="queued").length,
+        done=jobs.filter(j=>j.state==="done").length;
+  if(!run&&!wait){ toast("Nothing to stop"); return; }
+  if(confirm(`Stop the batch?\n\n• ${run?"The game copying now is stopped and its partial copy deleted (the original stays put).":"Nothing is running right now."}\n• ${wait} waiting job(s) are cancelled.\n• ${done} finished game(s) stay exactly where they are — nothing is undone.`))
+    post("/api/cancelall");
+};
+$("#sfAllBtn").onclick=()=>{ if(confirm("Apply the save fix to every game that has a save library in its fakelib? You can undo it per game.")) post("/api/savefix?id=all"); };
+$("#moveBtn").onclick=()=>queueSelected("move");
+$("#copyBtn").onclick=()=>{ if(confirm("Copy keeps the original, so SMP will see two copies with the same title ID. Continue?")) queueSelected("copy"); };
+$("#selNone").onclick=()=>{ sel.clear(); renderBatch(); refresh.sig=null; refresh(); };
+
+(function loop(){ refresh().finally(()=>{ const busy=state&&state.queue.running; setTimeout(loop, busy?1500:4000); }); })();
+</script>
+</body>
+</html>
