@@ -8,7 +8,7 @@ A PS5 homebrew payload that keeps your game library tidy for **ShadowMount Plus 
 
 | | |
 |---|---|
-| File | `glm-0.3.9.elf` |
+| Download | [`glm-0.3.9.elf`](https://github.com/leedsy90/game-library-manager-ps5/releases/latest) (Releases) |
 | SHA-256 | `b1eccd802a40bf7847f4056f0a137c6dba3bd7e19c70a190944d81d2fbafc0a3` |
 | Format | ELF64 x86-64 PIE, built with clang 18 and [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk) v0.43 |
 | Source | [`source/`](source/), with a [reproducible build](#source-and-verified-build) |
@@ -43,7 +43,7 @@ cd source && make
 ## Getting started
 
 1. Load ShadowMount Plus first. This is optional, but without it the SMP checks are switched off.
-2. Send `glm-0.3.9.elf` to your ELF loader, usually on port 9021.
+2. Download `glm-0.3.9.elf` from the [latest release](https://github.com/leedsy90/game-library-manager-ps5/releases/latest) and send it to your ELF loader, usually on port 9021.
 3. A notification appears: **"Game Library Manager 0.3.9 ready – Open http://&lt;ps5-ip&gt;:8095"**.
 4. Open that address on your phone or PC. You can also use the **Game Library Manager** tile it adds to the home screen.
 
