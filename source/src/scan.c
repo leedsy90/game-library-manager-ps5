@@ -121,8 +121,8 @@ static void list_dir_names(const char *dir, char *out, size_t outsz) {
 }
 
 /* Save library in a fakelib folder? Folders get "<name>.disabled" when the
- * fix is applied; inside .exfat images (renamed in place, same length)
- * ".sprx" becomes ".soff". */
+ * fix is applied; inside .exfat/.ffpfs/.ffpfsc images (renamed in place,
+ * same length) ".sprx" becomes ".soff". */
 bool is_save_lib(const char *name, bool *disabled) {
   if (strncasecmp(name, "libSceSaveData", 14))
     return false;
@@ -138,7 +138,7 @@ bool is_save_lib(const char *name, bool *disabled) {
   return ends_with_ci(base, ".sprx") || ends_with_ci(base, ".prx");
 }
 
-/* fakelib inside an .exfat/.ffpkg image */
+/* fakelib inside an .exfat/.ffpkg/.ffpfs/.ffpfsc image */
 static void image_fakelib(game_t *g) {
   char list[2048];
   if (image_list_dir(g->path, "fakelib", list, sizeof(list)) <= 0)
@@ -681,9 +681,10 @@ bool scan_get_game(int id, game_t *out) {
 }
 
 int savefix_apply_image(const game_t *g, bool undo, char *err, size_t errsz) {
-  if (strcmp(g->kind, "exfat")) {
-    snprintf(err, errsz,
-             "the save fix can only be applied inside .exfat images for now");
+  if (strcmp(g->kind, "exfat") && strcmp(g->kind, "pfsc") &&
+      strcmp(g->kind, "pfs")) {
+    snprintf(err, errsz, "the save fix can only be applied inside .exfat, "
+                         ".ffpfs and .ffpfsc images");
     return -1;
   }
   /* never write to an image ShadowMount has mounted */

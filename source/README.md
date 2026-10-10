@@ -1,4 +1,4 @@
-# Game Library Manager 0.3.9 (PS5 payload)
+# Game Library Manager 0.4.0 (PS5 payload)
 
 A companion to ShadowMount Plus (SMP). It finds games that SMP can't see because they're in the wrong folder, fixes them, and moves or copies games between drives in a batch queue. It pops up a PS5 notification and (optionally) a phone push on every job.
 
@@ -32,7 +32,7 @@ The first time the page opens (on the PS5 or your phone), a short guide walks th
 | **Needs attention** | Every game SMP won't pick up, with the reason and a suggested spot: too deep, extra wrapper folder, outside every scan folder, name starting with a dot, sitting in `backports`, or duplicate title IDs. It also looks *inside* `.exfat` and `.ffpkg` images (read-only, without mounting them) to catch images that have an extra top-level folder. **Fix** queues an instant rename on the same drive. **Fix all** queues the lot. |
 | **Library** | Every game on every drive. With SMP 1.7's API it also shows whether SMP actually sees each one. Tick several games, pick a drive, then **Move** or **Copy**. |
 | **Queue** | Runs one job at a time in the background, so you can close the page. It shows live MB/s, files done and time left. You can cancel, reorder or pause. It survives a crash or reboot: an interrupted job is restarted from scratch when you reload the payload. **Stop batch** cancels the job in progress (its partial copy is deleted and the original stays put) plus everything still waiting. Games that already finished are never touched or rolled back. |
-| **Save fix** | For backported games that won't save. Finds games whose `fakelib` contains a save library (`libSceSaveData*.sprx`). **Apply save fix** renames it to `.disabled` so the console's own save library is used instead. Nothing is deleted, **Undo** reverses it, and it takes effect the next time the game starts. **Apply to all** does every affected game. Individual fakelib files are under *Advanced*. |
+| **Save fix** | For backported games that won't save. Finds games whose `fakelib` contains a save library (`libSceSaveData*.sprx`). **Apply save fix** renames it to `.disabled` (inside `.exfat`, `.ffpfs` and `.ffpfsc` images: `.soff`) so the console's own save library is used instead. Nothing is deleted, **Undo** reverses it, and it takes effect the next time the game starts. **Apply to all** does every affected game. Individual fakelib files are under *Advanced*. |
 
 ### How a move between drives works
 
@@ -115,9 +115,9 @@ Game Library Manager checks SMP every scan and shows a banner at the top of the 
 
 In all of these, finding, fixing and moving games still work; only the "does SMP see it?" checks are switched off.
 
-## Limits in 0.3.9
+## Limits in 0.4.0
 
-- It can't look inside `.ffpfs` / `.ffpfsc` (PFS) images. It checks where they sit, not what's inside.
+- It looks inside `.ffpfs` / `.ffpfsc` images that hold an exFAT image (what PS5 FFPFSC PRO / MkPFS make, from folders and from `.exfat`). Other PFS images (signed, encrypted or without an exFAT inside) are still only checked for where they sit.
 - Verification needs SMP 1.7 with its API enabled (`api_enabled=1`, the default). Without it, everything else still works.
 - An image with a wrapper folder inside needs rebuilding on the PC. Game Library Manager tells you which ones, but can't repack them.
 - Conversion to `.ffpkg` / `.ffpfsc` isn't included yet, and `.pkg` files can be checked but not converted.
@@ -136,6 +136,7 @@ export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
 make            # game-library-manager.elf
 make host       # Linux build for testing: ./glm-host --data DIR --drive DIR [--drive DIR...]
 make tile-test  # Linux build of the tile launcher, to test its logic
+make imgtest    # Linux tool to test the image reader and save fix on copies of images
 ```
 
 GPL-3.0-or-later.

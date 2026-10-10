@@ -12,10 +12,17 @@ SRCS := src/main.c src/util.c src/config.c src/platform.c src/smp.c \
         src/tile.c src/archive.c src/web_index.c src/blob_tile.c \
         src/crypto.c src/pkginfo.c
 
+ZLIB := third_party/zlib
+ZLIB_SRCS := $(addprefix $(ZLIB)/,adler32.c compress.c crc32.c deflate.c \
+        inffast.c inflate.c inftrees.c trees.c uncompr.c zutil.c)
+LIBDEFLATE := third_party/libdeflate
+LIBDEFLATE_SRCS := $(LIBDEFLATE)/lib/deflate_compress.c $(LIBDEFLATE)/lib/utils.c
+
 LZMA := third_party/lzma
 LZMA_SRCS := $(addprefix $(LZMA)/,7zArcIn.c 7zBuf.c 7zCrc.c 7zCrcOpt.c \
         7zDec.c 7zStream.c 7zAlloc.c Alloc.c CpuArch.c Lzma2Dec.c \
-        Lzma2DecMt.c LzmaDec.c MtDec.c Threads.c Bcj2.c Bra.c Bra86.c Delta.c)
+        Lzma2DecMt.c LzmaDec.c MtDec.c Threads.c Bcj2.c Bra.c Bra86.c Delta.c) \
+        $(ZLIB_SRCS) $(LIBDEFLATE_SRCS)
 
 TILE_AUTHID := 0x3800000000000022
 TILE_SDKVER := 0x07590001
@@ -45,7 +52,7 @@ tile/eboot.bin: tile/eboot.elf tile/make_fself.py tile/authinfo.txt
 	  --app-version $(TILE_SDKVER) --fw-version $(TILE_SDKVER) $< $@
 
 game-library-manager.elf: $(SRCS) src/common.h src/crypto.h lzma-ps5.a
-	$(CC) -O2 -Wall -Werror -Isrc -I$(LZMA) -o $@ $(SRCS) .lzma-ps5/*.o $(LIBS)
+	$(CC) -O2 -Wall -Werror -Isrc -I$(LZMA) -I$(ZLIB) -I$(LIBDEFLATE) -o $@ $(SRCS) .lzma-ps5/*.o $(LIBS)
 
 lzma-ps5.a: $(LZMA_SRCS)
 	rm -rf .lzma-ps5 && mkdir -p .lzma-ps5
@@ -63,7 +70,7 @@ endif
 host: glm-host
 glm-host: $(SRCS) src/common.h src/crypto.h lzma-host.a
 	cc -O2 -g -Wall -Werror -Wno-format-truncation -Wno-stringop-truncation \
-	   -Isrc -I$(LZMA) -o $@ $(SRCS) lzma-host.a -lpthread
+	   -Isrc -I$(LZMA) -I$(ZLIB) -I$(LIBDEFLATE) -o $@ $(SRCS) lzma-host.a -lpthread
 
 lzma-host.a: $(LZMA_SRCS)
 	rm -rf .lzma-host && mkdir -p .lzma-host
@@ -71,10 +78,15 @@ lzma-host.a: $(LZMA_SRCS)
 	ar rcs $@ .lzma-host/*.o
 
 clean:
-	rm -rf game-library-manager.elf glm-host lzma-*.a .lzma-* tile/*.o tile/eboot.elf \
+	rm -rf game-library-manager.elf glm-host imgtest lzma-*.a .lzma-* tile/*.o tile/eboot.elf \
 	      src/blob_*.c
 
 .PHONY: all host clean test
+
+# Linux test tool for the image reader / save fix (tools/imgtest.c)
+imgtest: tools/imgtest.c src/imgpeek.c src/util.c src/common.h
+	cc -O2 -g -Wall -Werror -Isrc -I$(ZLIB) -I$(LIBDEFLATE) -o $@ \
+	   tools/imgtest.c src/util.c $(ZLIB_SRCS) $(LIBDEFLATE_SRCS) -lpthread
 
 # Linux build of the tile launcher, for testing its logic
 tile-test: tile/eboot.c

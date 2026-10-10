@@ -1,6 +1,6 @@
 #!/bin/sh
 # Rebuilds game-library-manager.elf from source/ and checks it matches the
-# published glm-0.3.9.elf byte for byte. Needs Docker. Run from the repo root:
+# published glm-0.4.0.elf byte for byte. Needs Docker. Run from the repo root:
 #   sh reproduce-build.sh
 set -e
 docker run --rm -v "$(pwd):/repo" ubuntu:24.04 sh -c '
@@ -12,6 +12,6 @@ docker run --rm -v "$(pwd):/repo" ubuntu:24.04 sh -c '
   unzip -q /tmp/sdk.zip -d /opt
   cp -r /repo/source /tmp/glm && cd /tmp/glm
   PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk make >/dev/null
-  sha256sum game-library-manager.elf /repo/glm-0.3.9.elf
-  cmp game-library-manager.elf /repo/glm-0.3.9.elf && echo "MATCH: glm-0.3.9.elf was built from this source"
+  sha256sum game-library-manager.elf /repo/glm-0.4.0.elf
+  cmp game-library-manager.elf /repo/glm-0.4.0.elf && echo "MATCH: glm-0.4.0.elf was built from this source"
 '

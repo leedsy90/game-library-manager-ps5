@@ -1,7 +1,8 @@
-/* Read-only peeking inside .exfat and .ffpkg (UFS2) images without
- * mounting them. We only need the top one or two directory levels and
- * sce_sys/param.json, so this is a tiny reader, not a filesystem driver.
- * Nothing here ever writes to the image. */
+/* Read-only peeking inside .exfat, .ffpkg (UFS2) and .ffpfs/.ffpfsc
+ * (exFAT inside a PFS container) images without mounting them. We only
+ * need the top one or two directory levels and sce_sys/param.json, so
+ * this is a tiny reader, not a filesystem driver. The only write is the
+ * save fix rename at the end of this file. */
 #include "common.h"
 
 #include <errno.h>
@@ -11,6 +12,9 @@
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+
+#include "libdeflate.h"
+#include "zlib.h"
 
 const char *image_kind(const char *name) {
   if (ends_with_ci(name, ".ffpkg"))
@@ -46,6 +50,496 @@ static uint64_t le64(const uint8_t *p) {
   return (uint64_t)le32(p) | (uint64_t)le32(p + 4) << 32;
 }
 
+/* ================================================================== */
+/* Volume I/O: an exFAT volume is either the whole .exfat file, or the  */
+/* single file inside a .ffpfs / .ffpfsc container (what PS5 FFPFSC PRO */
+/* / MkPFS produce: an unsigned, unencrypted PFS holding one exFAT     */
+/* image, stored plain (.ffpfs) or as PFSC zlib blocks (.ffpfsc)).     */
+/*                                                                    */
+/* PFSC: a header, a table of (n+1) u64 offsets, then n blocks of     */
+/* 64 KB each, every block zlib-compressed on its own (or stored raw  */
+/* when its slot is exactly 64 KB). A write re-encodes the block to   */
+/* exactly its old length where it can, or else borrows a few bytes   */
+/* from a nearby block that compresses smaller; nothing outside that  */
+/* stretch of blocks and their offset table entries is ever touched.  */
+
+#define PFS_MAGIC 20130315
+#define PFSC_MAGIC 0x43534650u
+#define PFS_DINODE_SIZE 0xA8
+
+typedef struct {
+  int fd;
+  const char *path; /* for the backup file written before a block pair */
+  uint64_t base;    /* byte offset of the volume (or PFSC payload) */
+  uint64_t size;    /* logical size of the volume */
+  bool pfsc;
+  uint32_t lbs;     /* PFSC logical block size */
+  uint64_t nblocks;
+  uint64_t offtab;  /* absolute offset of the PFSC offset table */
+  int64_t cache_idx;
+  uint8_t *cache;
+} vio_t;
+
+static bool vio_open_plain(vio_t *io, int fd) {
+  memset(io, 0, sizeof(*io));
+  io->fd = fd;
+  io->cache_idx = -1;
+  off_t end = lseek(fd, 0, SEEK_END);
+  io->size = end > 0 ? (uint64_t)end : 0;
+  return true;
+}
+
+/* Find the one exFAT file inside an unsigned, unencrypted PFS container. */
+static bool vio_open_pfs(vio_t *io, int fd) {
+  memset(io, 0, sizeof(*io));
+  io->fd = fd;
+  io->cache_idx = -1;
+  uint8_t h[0x48];
+  if (!pread_full(fd, h, sizeof(h), 0) || le64(h + 8) != PFS_MAGIC)
+    return false;
+  uint16_t mode = le16(h + 0x1C);
+  uint32_t bs = le32(h + 0x20);
+  uint64_t ninodes = le64(h + 0x30);
+  if ((mode & 0x5) || bs < 4096 || bs > 1024 * 1024 || ninodes > 1000000)
+    return false; /* signed or encrypted: not something we can read */
+  uint32_t per_block = bs / PFS_DINODE_SIZE;
+  uint64_t best_size = 0, best_db = 0;
+  bool best_comp = false;
+  for (uint64_t i = 0; i < ninodes; i++) {
+    uint8_t di[PFS_DINODE_SIZE];
+    uint64_t off = (uint64_t)bs + (i / per_block) * bs +
+                   (i % per_block) * PFS_DINODE_SIZE;
+    if (!pread_full(fd, di, sizeof(di), off))
+      return false;
+    uint16_t imode = le16(di);
+    uint32_t flags = le32(di + 4);
+    uint64_t size = le64(di + 8);
+    int32_t db0 = (int32_t)le32(di + 0x64);
+    if (!(imode & 0x8000) || (flags & 0x20000) || db0 <= 0)
+      continue; /* not a regular file, or the PFS's own internal files */
+    if (size > best_size) {
+      best_size = size;
+      best_db = (uint64_t)db0;
+      best_comp = (flags & 0x1) != 0;
+    }
+  }
+  if (!best_size)
+    return false;
+  io->base = best_db * bs;
+  io->size = best_size;
+  if (!best_comp)
+    return true;
+  uint8_t p[0x30];
+  if (!pread_full(fd, p, sizeof(p), io->base) || le32(p) != PFSC_MAGIC ||
+      le32(p + 4) != 0 || le32(p + 8) != 6)
+    return false;
+  io->lbs = le32(p + 0x0C);
+  uint64_t logical = le64(p + 0x28);
+  if (io->lbs != 0x10000 || le64(p + 0x10) != io->lbs || !logical ||
+      logical % io->lbs)
+    return false;
+  io->pfsc = true;
+  io->size = logical;
+  io->nblocks = logical / io->lbs;
+  io->offtab = io->base + le64(p + 0x18);
+  io->cache = malloc(io->lbs);
+  return io->cache != NULL;
+}
+
+static void vio_close(vio_t *io) {
+  free(io->cache);
+  io->cache = NULL;
+}
+
+/* slot of PFSC block idx: absolute offset and stored length */
+static bool pfsc_slot(vio_t *io, uint64_t idx, uint64_t *off, uint64_t *len) {
+  uint8_t o[16];
+  if (idx >= io->nblocks || !pread_full(io->fd, o, 16, io->offtab + idx * 8))
+    return false;
+  uint64_t a = le64(o), b = le64(o + 8);
+  if (b <= a || b - a > io->lbs)
+    return false;
+  *off = io->base + a;
+  *len = b - a;
+  return true;
+}
+
+static bool pfsc_get(vio_t *io, uint64_t idx) {
+  if (io->cache_idx == (int64_t)idx)
+    return true;
+  io->cache_idx = -1;
+  uint64_t off, len;
+  if (!pfsc_slot(io, idx, &off, &len))
+    return false;
+  uint8_t *stored = malloc(len);
+  if (!stored)
+    return false;
+  bool ok = pread_full(io->fd, stored, len, off);
+  if (ok && len == io->lbs) {
+    memcpy(io->cache, stored, len);
+  } else if (ok) {
+    uLongf out = io->lbs;
+    ok = uncompress(io->cache, &out, stored, (uLong)len) == Z_OK &&
+         out == io->lbs;
+  }
+  free(stored);
+  if (ok)
+    io->cache_idx = (int64_t)idx;
+  return ok;
+}
+
+static bool vio_read(vio_t *io, void *buf, size_t n, uint64_t off) {
+  if (!io->pfsc)
+    return pread_full(io->fd, buf, n, io->base + off);
+  uint8_t *p = buf;
+  while (n) {
+    uint64_t idx = off / io->lbs, in = off % io->lbs;
+    if (!pfsc_get(io, idx))
+      return false;
+    size_t k = io->lbs - in < n ? io->lbs - in : n;
+    memcpy(p, io->cache + in, k);
+    p += k;
+    off += k;
+    n -= k;
+  }
+  return true;
+}
+
+/* zlib-encode one block into exactly `want` bytes, as
+ *   zlib header | padding | deflate(data) | adler32
+ * The padding is empty, non-final deflate blocks, which every inflater
+ * skips: g empty stored blocks (5 bytes each) for big steps, then m empty
+ * fixed-Huffman blocks (10 bits each) for small ones. Those 10-bit blocks
+ * leave the compressed data starting mid-byte, so it is copied bit by bit
+ * using its exact bit length (from inflate).
+ *
+ * The block was originally made by zlib at level 9, so re-encoding it at
+ * that level after a change often comes out a byte or two too big. That's
+ * why libdeflate's near-optimal levels (12..10) are tried first: they
+ * usually leave room to spare. zlib's settings are the fallback. The first
+ * result that can be padded to exactly `want` is used. */
+static void put_bits(uint8_t *out, uint64_t *bitpos, uint32_t v, int n) {
+  for (int i = 0; i < n; i++, (*bitpos)++) {
+    if ((*bitpos & 7) == 0)
+      out[*bitpos >> 3] = 0;
+    if (v >> i & 1)
+      out[*bitpos >> 3] |= (uint8_t)(1u << (*bitpos & 7));
+  }
+}
+
+/* exact length in bits of a raw deflate stream that inflates to n bytes */
+static bool deflate_bits(const uint8_t *raw, uint64_t len, uint8_t *scratch,
+                         uint32_t n, uint64_t *bits) {
+  z_stream s;
+  memset(&s, 0, sizeof(s));
+  if (inflateInit2(&s, -MAX_WBITS) != Z_OK)
+    return false;
+  s.next_in = (Bytef *)raw;
+  s.avail_in = (uInt)len;
+  s.next_out = scratch;
+  s.avail_out = n;
+  bool ok = inflate(&s, Z_FINISH) == Z_STREAM_END && s.total_out == n;
+  /* data_type holds the unused bits left in the last byte read */
+  *bits = (uint64_t)s.total_in * 8 - (uint64_t)(s.data_type & 63);
+  inflateEnd(&s);
+  return ok && *bits <= len * 8 && *bits + 8 > len * 8;
+}
+
+/* raw-deflate data into at most `cap` bytes with setting number t.
+ * Returns the compressed size, 0 if it doesn't fit, -1 when out of tries. */
+static int64_t deflate_try(int t, const uint8_t *data, uint32_t n,
+                           uint8_t *out, uint64_t cap) {
+  static const int ld_levels[] = {12, 11, 10};
+  static const struct {
+    int level, mem, strategy;
+  } zl[] = {{9, 8, Z_DEFAULT_STRATEGY}, {9, 9, Z_DEFAULT_STRATEGY},
+            {8, 8, Z_DEFAULT_STRATEGY}, {6, 8, Z_DEFAULT_STRATEGY},
+            {9, 8, Z_FILTERED},         {6, 8, Z_FILTERED}};
+  int nld = (int)(sizeof(ld_levels) / sizeof(ld_levels[0]));
+  if (t < nld) {
+    struct libdeflate_compressor *c =
+        libdeflate_alloc_compressor(ld_levels[t]);
+    if (!c)
+      return 0;
+    size_t a = libdeflate_deflate_compress(c, data, n, out, (size_t)cap);
+    libdeflate_free_compressor(c);
+    return (int64_t)a;
+  }
+  t -= nld;
+  if (t >= (int)(sizeof(zl) / sizeof(zl[0])))
+    return -1;
+  z_stream s;
+  memset(&s, 0, sizeof(s));
+  if (deflateInit2(&s, zl[t].level, Z_DEFLATED, -MAX_WBITS, zl[t].mem,
+                   zl[t].strategy) != Z_OK)
+    return 0;
+  s.next_in = (Bytef *)data;
+  s.avail_in = n;
+  s.next_out = out;
+  s.avail_out = (uInt)cap;
+  int rc = deflate(&s, Z_FINISH);
+  uint64_t a = s.total_out;
+  deflateEnd(&s);
+  return rc == Z_STREAM_END ? (int64_t)a : 0;
+}
+
+static bool zlib_encode_exact(const uint8_t *data, uint32_t n, uint8_t *out,
+                              uint64_t want) {
+  if (want < 8)
+    return false;
+  uint8_t *raw = malloc((size_t)want), *scratch = malloc(n);
+  bool done = false;
+  int64_t a;
+  for (int t = 0; raw && scratch && !done &&
+                  (a = deflate_try(t, data, n, raw, want - 6)) >= 0;
+       t++) {
+    uint64_t bits;
+    if (a == 0 || !deflate_bits(raw, (uint64_t)a, scratch, n, &bits))
+      continue; /* too big at this setting */
+    /* find g stored + m fixed empty blocks giving exactly want bytes */
+    uint64_t body = want - 6; /* bytes between zlib header and adler32 */
+    int g = -1, m = -1;
+    for (uint64_t gg = 0; gg * 5 <= body && g < 0; gg++)
+      for (int mm = 0; mm < 16; mm++)
+        if (gg * 5 + (10 * (uint64_t)mm + bits + 7) / 8 == body) {
+          g = (int)gg;
+          m = mm;
+          break;
+        }
+    if (g < 0)
+      continue;
+    uint64_t bit = 16;
+    out[0] = 0x78;
+    out[1] = 0xDA;
+    for (int i = 0; i < g; i++) {
+      put_bits(out, &bit, 0, 3);   /* BFINAL=0, BTYPE=00 stored */
+      put_bits(out, &bit, 0, 5);   /* align (we start byte-aligned) */
+      put_bits(out, &bit, 0x0000, 16);
+      put_bits(out, &bit, 0xFFFF, 16);
+    }
+    for (int i = 0; i < m; i++) {
+      put_bits(out, &bit, 0, 1); /* BFINAL=0 */
+      put_bits(out, &bit, 1, 2); /* BTYPE=01 fixed Huffman */
+      put_bits(out, &bit, 0, 7); /* end-of-block, code 256 = 0000000 */
+    }
+    for (uint64_t i = 0; i < bits; i++)
+      put_bits(out, &bit, raw[i >> 3] >> (i & 7) & 1, 1);
+    while (bit & 7)
+      put_bits(out, &bit, 0, 1);
+    uint64_t o = bit >> 3;
+    uLong ad = adler32(adler32(0L, Z_NULL, 0), data, n);
+    out[o++] = (uint8_t)(ad >> 24);
+    out[o++] = (uint8_t)(ad >> 16);
+    out[o++] = (uint8_t)(ad >> 8);
+    out[o++] = (uint8_t)ad;
+    done = o == want;
+  }
+  free(raw);
+  free(scratch);
+  return done;
+}
+
+/* Encode `data` (one logical block) into exactly `len` bytes and check it
+ * decodes back. A slot of exactly one block holds the data uncompressed. */
+static bool pfsc_encode(vio_t *io, const uint8_t *data, uint8_t *enc,
+                        uint64_t len) {
+  if (len == io->lbs) {
+    memcpy(enc, data, len);
+    return true;
+  }
+  if (len > io->lbs)
+    return false;
+  uint8_t *chk = malloc(io->lbs);
+  uLongf out = io->lbs;
+  bool ok = chk && zlib_encode_exact(data, io->lbs, enc, len) &&
+            uncompress(chk, &out, enc, (uLong)len) == Z_OK &&
+            out == io->lbs && !memcmp(chk, data, io->lbs);
+  free(chk);
+  return ok;
+}
+
+#define PFSC_DONOR_RANGE 256 /* blocks searched on each side for spare bytes */
+
+static void put_le64(uint8_t *p, uint64_t v) {
+  for (int i = 0; i < 8; i++)
+    p[i] = (uint8_t)(v >> (8 * i));
+}
+
+/* When block idx needs D more bytes than its slot, take them from the
+ * nearest block j (either side) that can be re-encoded D bytes smaller.
+ * The blocks between idx and j keep their compressed bytes exactly as they
+ * are and just move by D; their offset table entries move with them. Only
+ * the bytes from idx to j and those table entries change. Both are saved
+ * to "<image>.glm-backup" first and restored if anything fails to read
+ * back; the backup is removed once everything verifies. */
+static bool pfsc_put_shift(vio_t *io, uint64_t idx, const uint8_t *data) {
+  uint64_t off_i, len_i;
+  if (!pfsc_slot(io, idx, &off_i, &len_i))
+    return false;
+  uint8_t *enc_me = malloc(io->lbs), *enc_j = malloc(io->lbs),
+          *data_j = malloc(io->lbs), *raw = malloc(io->lbs);
+  bool ok = enc_me && enc_j && data_j && raw;
+  /* how many extra bytes the changed block needs */
+  int64_t a = ok ? deflate_try(0, data, io->lbs, raw, io->lbs - 1) : 0;
+  uint64_t w = 0;
+  for (uint64_t t = len_i + 1; ok && a > 0 && t < io->lbs && t <= len_i + 96;
+       t++)
+    if (t >= (uint64_t)a + 6 && pfsc_encode(io, data, enc_me, t)) {
+      w = t;
+      break;
+    }
+  ok = ok && w;
+  uint64_t d = w - len_i;
+  /* nearest donor */
+  int64_t j = -1;
+  uint64_t off_j = 0, len_j = 0;
+  for (uint64_t dist = 1; ok && j < 0 && dist <= PFSC_DONOR_RANGE; dist++) {
+    for (int side = 0; side < 2 && j < 0; side++) {
+      if (side == 0 && idx + dist >= io->nblocks)
+        continue;
+      if (side == 1 && dist > idx)
+        continue;
+      uint64_t c = side == 0 ? idx + dist : idx - dist, oc, lc;
+      if (!pfsc_slot(io, c, &oc, &lc) || lc < d + 16 || !pfsc_get(io, c))
+        continue;
+      memcpy(data_j, io->cache, io->lbs);
+      int64_t ac = deflate_try(0, data_j, io->lbs, raw, lc - d);
+      if (ac <= 0 || (uint64_t)ac + 6 > lc - d)
+        continue;
+      if (pfsc_encode(io, data_j, enc_j, lc - d)) {
+        j = (int64_t)c;
+        off_j = oc;
+        len_j = lc;
+      }
+    }
+  }
+  ok = ok && j >= 0;
+  if (!ok)
+    goto out;
+  {
+    bool right = (uint64_t)j > idx;
+    uint64_t start = right ? off_i : off_j;
+    uint64_t end = right ? off_j + len_j : off_i + len_i;
+    uint64_t span = end - start;
+    /* table entries that move: the starts of blocks after the lower one,
+     * up to and including the higher one */
+    uint64_t t0 = (right ? idx : (uint64_t)j) + 1;
+    uint64_t t1 = right ? (uint64_t)j : idx;
+    uint64_t nent = t1 - t0 + 1;
+    uint8_t *old = malloc((size_t)span), *neu = malloc((size_t)span),
+            *oldtab = malloc(8 * nent), *newtab = malloc(8 * nent);
+    char bpath[1100];
+    snprintf(bpath, sizeof(bpath), "%s.glm-backup", io->path ? io->path : "");
+    ok = old && neu && oldtab && newtab && io->path &&
+         pread_full(io->fd, old, (size_t)span, start) &&
+         pread_full(io->fd, oldtab, 8 * nent, io->offtab + t0 * 8);
+    if (ok) {
+      /* new layout */
+      if (right) {
+        memcpy(neu, enc_me, w);
+        memcpy(neu + w, old + len_i, (size_t)(off_j - off_i - len_i));
+        memcpy(neu + (off_j - off_i) + d, enc_j, (size_t)(len_j - d));
+      } else {
+        memcpy(neu, enc_j, (size_t)(len_j - d));
+        memcpy(neu + len_j - d, old + len_j, (size_t)(off_i - off_j - len_j));
+        memcpy(neu + (off_i - off_j) - d, enc_me, w);
+      }
+      for (uint64_t k = 0; k < nent; k++)
+        put_le64(newtab + 8 * k,
+                 right ? le64(oldtab + 8 * k) + d : le64(oldtab + 8 * k) - d);
+      /* backup: start, span, first entry, entry count, entries, bytes */
+      uint8_t head[32];
+      put_le64(head, start);
+      put_le64(head + 8, span);
+      put_le64(head + 16, t0);
+      put_le64(head + 24, nent);
+      int bfd = open(bpath, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+      ok = bfd >= 0 && write(bfd, head, 32) == 32 &&
+           write(bfd, oldtab, 8 * nent) == (ssize_t)(8 * nent) &&
+           write(bfd, old, (size_t)span) == (ssize_t)span && fsync(bfd) == 0;
+      if (bfd >= 0)
+        close(bfd);
+    }
+    if (ok) {
+      bool wrote =
+          pwrite(io->fd, neu, (size_t)span, (off_t)start) == (ssize_t)span &&
+          pwrite(io->fd, newtab, 8 * nent, (off_t)(io->offtab + t0 * 8)) ==
+              (ssize_t)(8 * nent) &&
+          fsync(io->fd) == 0;
+      io->cache_idx = -1;
+      bool good = wrote && pfsc_get(io, (uint64_t)j) &&
+                  !memcmp(io->cache, data_j, io->lbs) && pfsc_get(io, idx) &&
+                  !memcmp(io->cache, data, io->lbs);
+      for (uint64_t k = t0; good && k <= t1; k++)
+        good = pfsc_get(io, k) || k == idx;
+      if (good) {
+        unlink(bpath);
+      } else {
+        if (pwrite(io->fd, old, (size_t)span, (off_t)start) ==
+                (ssize_t)span &&
+            pwrite(io->fd, oldtab, 8 * nent, (off_t)(io->offtab + t0 * 8)) ==
+                (ssize_t)(8 * nent) &&
+            fsync(io->fd) == 0)
+          unlink(bpath);
+        ok = false;
+      }
+      io->cache_idx = -1;
+    }
+    free(old);
+    free(neu);
+    free(oldtab);
+    free(newtab);
+  }
+out:
+  free(enc_me);
+  free(enc_j);
+  free(data_j);
+  free(raw);
+  return ok;
+}
+
+/* Rewrite PFSC block idx with new contents: in its own slot when it can be
+ * re-encoded to exactly the same length, otherwise by borrowing a few
+ * bytes from a nearby block (see pfsc_put_shift). Everything is decoded
+ * again before it is written, and read back from disk afterwards. */
+static bool pfsc_put(vio_t *io, uint64_t idx, const uint8_t *data) {
+  uint64_t off, len;
+  if (!pfsc_slot(io, idx, &off, &len))
+    return false;
+  uint8_t *enc = malloc(io->lbs);
+  bool ok = enc && pfsc_encode(io, data, enc, len) &&
+            pwrite(io->fd, enc, (size_t)len, (off_t)off) == (ssize_t)len &&
+            fsync(io->fd) == 0;
+  free(enc);
+  io->cache_idx = -1;
+  if (ok)
+    return pfsc_get(io, idx) && !memcmp(io->cache, data, io->lbs);
+  return pfsc_put_shift(io, idx, data);
+}
+
+static bool vio_write(vio_t *io, const void *buf, size_t n, uint64_t off) {
+  if (!io->pfsc)
+    return pwrite(io->fd, buf, n, (off_t)(io->base + off)) == (ssize_t)n;
+  const uint8_t *p = buf;
+  uint8_t *blk = malloc(io->lbs);
+  bool ok = blk != NULL;
+  while (ok && n) {
+    uint64_t idx = off / io->lbs, in = off % io->lbs;
+    size_t k = io->lbs - in < n ? io->lbs - in : n;
+    ok = pfsc_get(io, idx);
+    if (ok) {
+      memcpy(blk, io->cache, io->lbs);
+      memcpy(blk + in, p, k);
+      ok = pfsc_put(io, idx, blk);
+    }
+    p += k;
+    off += k;
+    n -= k;
+  }
+  free(blk);
+  return ok;
+}
+
 /* Generic directory entry */
 typedef struct {
   char name[256];
@@ -60,7 +554,7 @@ typedef struct {
 /* ================================================================== */
 /* exFAT                                                               */
 typedef struct {
-  int fd;
+  vio_t *io;
   uint64_t fat_off;
   uint64_t heap_off;
   uint32_t clus_size;
@@ -68,13 +562,13 @@ typedef struct {
   uint32_t clus_count;
 } exfat_t;
 
-static bool exfat_open(exfat_t *x, int fd) {
+static bool exfat_open(exfat_t *x, vio_t *io) {
   uint8_t bs[512];
-  if (!pread_full(fd, bs, sizeof(bs), 0) || memcmp(bs + 3, "EXFAT   ", 8))
+  if (!vio_read(io, bs, sizeof(bs), 0) || memcmp(bs + 3, "EXFAT   ", 8))
     return false;
   uint32_t bps = 1u << bs[108];
   uint32_t spc = 1u << bs[109];
-  x->fd = fd;
+  x->io = io;
   x->fat_off = (uint64_t)le32(bs + 80) * bps;
   x->heap_off = (uint64_t)le32(bs + 88) * bps;
   x->clus_count = le32(bs + 92);
@@ -85,7 +579,7 @@ static bool exfat_open(exfat_t *x, int fd) {
 
 static uint32_t exfat_next(exfat_t *x, uint32_t c) {
   uint8_t b[4];
-  if (!pread_full(x->fd, b, 4, x->fat_off + (uint64_t)c * 4))
+  if (!vio_read(x->io, b, 4, x->fat_off + (uint64_t)c * 4))
     return 0xFFFFFFFF;
   return le32(b);
 }
@@ -105,7 +599,7 @@ static uint8_t *exfat_read_chain(exfat_t *x, uint32_t first, uint64_t len,
     size_t n = x->clus_size;
     if (n > len - got)
       n = len - got;
-    if (!pread_full(x->fd, buf + got, n,
+    if (!vio_read(x->io, buf + got, n,
                     x->heap_off + (uint64_t)(c - 2) * x->clus_size))
       break;
     got += n;
@@ -269,9 +763,57 @@ static int ufs_list(ufs_t *u, uint64_t ino, dent_t *out, int max) {
 /* Common logic                                                        */
 typedef struct {
   bool is_exfat;
+  int fd;
+  vio_t io;
   exfat_t x;
   ufs_t u;
 } img_t;
+
+/* Open an image of any supported kind. Returns false if it can't be read
+ * (*unsupported is set when it's a container we don't look inside). */
+static bool img_open(img_t *im, const char *path, bool rw, bool *unsupported) {
+  memset(im, 0, sizeof(*im));
+  im->fd = -1;
+  if (unsupported)
+    *unsupported = false;
+  const char *kind = image_kind(path);
+  if (!kind) {
+    if (unsupported)
+      *unsupported = true;
+    return false;
+  }
+  im->fd = open(path, rw ? O_RDWR : O_RDONLY);
+  if (im->fd < 0)
+    return false;
+  bool ok;
+  if (!strcmp(kind, "ufs")) {
+    ok = ufs_open(&im->u, im->fd);
+  } else {
+    im->is_exfat = true;
+    if (!strcmp(kind, "exfat")) {
+      ok = vio_open_plain(&im->io, im->fd);
+    } else {
+      ok = vio_open_pfs(&im->io, im->fd);
+      im->io.path = path;
+      if (!ok && unsupported)
+        *unsupported = true; /* not an exFAT-in-PFS container */
+    }
+    ok = ok && exfat_open(&im->x, &im->io);
+  }
+  if (!ok) {
+    vio_close(&im->io);
+    close(im->fd);
+    im->fd = -1;
+  }
+  return ok;
+}
+
+static void img_close(img_t *im) {
+  vio_close(&im->io);
+  if (im->fd >= 0)
+    close(im->fd);
+  im->fd = -1;
+}
 
 static int img_list(img_t *im, const dent_t *dir, dent_t *out, int max) {
   if (im->is_exfat) {
@@ -352,21 +894,10 @@ peek_result_t image_peek(const char *path, char *title_id, size_t tidsz,
     title[0] = 0;
   if (wrapper && wrapsz)
     wrapper[0] = 0;
-  const char *kind = image_kind(path);
-  if (!kind || (strcmp(kind, "exfat") && strcmp(kind, "ufs")))
-    return PEEK_UNSUPPORTED;
-
-  int fd = open(path, O_RDONLY);
-  if (fd < 0)
-    return PEEK_ERROR;
   img_t im;
-  memset(&im, 0, sizeof(im));
-  im.is_exfat = !strcmp(kind, "exfat");
-  bool ok = im.is_exfat ? exfat_open(&im.x, fd) : ufs_open(&im.u, fd);
-  if (!ok) {
-    close(fd);
-    return PEEK_ERROR;
-  }
+  bool unsupported;
+  if (!img_open(&im, path, false, &unsupported))
+    return unsupported ? PEEK_UNSUPPORTED : PEEK_ERROR;
 
   peek_result_t res = PEEK_NO_GAME;
   if (check_game_dir(&im, NULL, title_id, tidsz, title, titlesz)) {
@@ -389,7 +920,7 @@ peek_result_t image_peek(const char *path, char *title_id, size_t tidsz,
     }
     free(root);
   }
-  close(fd);
+  img_close(&im);
   return res;
 }
 
@@ -399,19 +930,9 @@ peek_result_t image_peek(const char *path, char *title_id, size_t tidsz,
 int image_list_dir(const char *path, const char *subdir, char *out,
                    size_t outsz) {
   out[0] = 0;
-  const char *kind = image_kind(path);
-  if (!kind || (strcmp(kind, "exfat") && strcmp(kind, "ufs")))
-    return -1;
-  int fd = open(path, O_RDONLY);
-  if (fd < 0)
-    return -1;
   img_t im;
-  memset(&im, 0, sizeof(im));
-  im.is_exfat = !strcmp(kind, "exfat");
-  if (!(im.is_exfat ? exfat_open(&im.x, fd) : ufs_open(&im.u, fd))) {
-    close(fd);
+  if (!img_open(&im, path, false, NULL))
     return -1;
-  }
   dent_t *a = calloc(MAX_DENTS, sizeof(dent_t));
   dent_t *b = calloc(MAX_DENTS, sizeof(dent_t));
   int n = -1;
@@ -445,7 +966,7 @@ int image_list_dir(const char *path, const char *subdir, char *out,
   }
   free(a);
   free(b);
-  close(fd);
+  img_close(&im);
   return n;
 }
 
@@ -506,8 +1027,8 @@ static bool exfat_entry_rw(exfat_t *x, const uint64_t *offs, int nclus,
     return false;
   uint64_t off = offs[ci] + byte % x->clus_size;
   if (write)
-    return pwrite(x->fd, e, 32, (off_t)off) == 32;
-  return pread_full(x->fd, e, 32, off);
+    return vio_write(x->io, e, 32, off);
+  return vio_read(x->io, e, 32, off);
 }
 
 /* Find directory `dirname` in the root, then rename `from` to `to` inside
@@ -600,14 +1121,30 @@ static int exfat_rename_in(exfat_t *x, const char *dirname, const char *from,
     uint16_t cs = exfat_set_checksum(set, sec + 1);
     set[2] = (uint8_t)(cs & 0xFF);
     set[3] = (uint8_t)(cs >> 8);
-    for (int k = 0; k <= sec; k++) {
-      if (!exfat_entry_rw(x, offs, nclus, i + (uint64_t)k, set + 32 * k,
-                          true)) {
-        snprintf(err, errsz, "write failed: %s", strerror(errno));
-        return -1;
-      }
+    /* one write for the whole set when it sits in one cluster, so a
+     * compressed (.ffpfsc) block is only re-encoded once */
+    uint64_t first = i * 32, last = (i + (uint64_t)sec) * 32;
+    bool written;
+    if (first / x->clus_size == last / x->clus_size &&
+        first / x->clus_size < (uint64_t)nclus) {
+      written = vio_write(x->io, set, 32 * (size_t)(sec + 1),
+                          offs[first / x->clus_size] + first % x->clus_size);
+    } else {
+      written = true;
+      for (int k = 0; k <= sec && written; k++)
+        written = exfat_entry_rw(x, offs, nclus, i + (uint64_t)k,
+                                 set + 32 * k, true);
     }
-    fsync(x->fd);
+    if (!written) {
+      if (x->io->pfsc)
+        snprintf(err, errsz, "couldn't fit the changed block back into the "
+                             ".ffpfsc - nothing was changed");
+      else
+        snprintf(err, errsz, "write failed: %s", strerror(errno));
+      return -1;
+    }
+    if (!x->io->pfsc)
+      fsync(x->io->fd);
     /* read back and verify */
     uint8_t chk[19 * 32];
     for (int k = 0; k <= sec; k++)
@@ -627,21 +1164,23 @@ int image_rename_in_dir(const char *path, const char *dirname,
                         const char *from, const char *to, char *err,
                         size_t errsz) {
   const char *kind = image_kind(path);
-  if (!kind || strcmp(kind, "exfat")) {
-    snprintf(err, errsz, "only .exfat images can be changed in place");
+  if (!kind || !strcmp(kind, "ufs")) {
+    snprintf(err, errsz,
+             "only .exfat, .ffpfs and .ffpfsc images can be changed in place");
     return -1;
   }
-  int fd = open(path, O_RDWR);
-  if (fd < 0) {
-    snprintf(err, errsz, "can't open image for writing: %s", strerror(errno));
+  img_t im;
+  bool unsupported;
+  if (!img_open(&im, path, true, &unsupported)) {
+    if (unsupported)
+      snprintf(err, errsz, "this %s doesn't hold an exFAT image, so it can't "
+                           "be changed in place", kind);
+    else
+      snprintf(err, errsz, "can't open the image for writing: %s",
+               errno ? strerror(errno) : "not a readable exFAT image");
     return -1;
   }
-  exfat_t x;
-  int rc = -1;
-  if (exfat_open(&x, fd))
-    rc = exfat_rename_in(&x, dirname, from, to, err, errsz);
-  else
-    snprintf(err, errsz, "not a readable exFAT image");
-  close(fd);
+  int rc = exfat_rename_in(&im.x, dirname, from, to, err, errsz);
+  img_close(&im);
   return rc;
 }

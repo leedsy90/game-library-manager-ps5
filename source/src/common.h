@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#define SS_VERSION "0.3.9"
+#define SS_VERSION "0.4.0"
 #define SS_MAX_PATH 1024
 #define SS_MAX_ROOTS 64
 #define SS_MAX_GAMES 2048
@@ -159,7 +159,7 @@ bool smp_set_scan_depth(int depth, char *err, size_t errsz);
 /* ------------------------------------------------------------------ */
 /* Image peeking (read-only, no mount)                                 */
 typedef enum {
-  PEEK_UNSUPPORTED = 0, /* pfs / pfsc: can't look inside */
+  PEEK_UNSUPPORTED = 0, /* a container that doesn't hold exFAT */
   PEEK_OK,              /* sce_sys/param.json at image root */
   PEEK_WRAPPED,         /* game is inside one extra top-level folder */
   PEEK_NO_GAME,         /* no param.json found */
