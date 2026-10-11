@@ -15,6 +15,12 @@ A PS5 homebrew payload that keeps your game library tidy for **ShadowMount Plus 
 | Licence | GPL-3.0-or-later ([LICENSE](LICENSE)) |
 | Recommended | ShadowMount Plus 1.7 or newer (needed for the "does SMP see it?" checks) |
 
+## Demo
+
+[![The Library page of Game Library Manager in a browser, listing games on the USB drive with their status](media/glm-demo.png)](media/glm-demo.mp4)
+
+A 90-second walkthrough of the web page: Overview, Needs attention, Library, Queue and Save fix. Click the image to watch the video ([`media/glm-demo.mp4`](media/glm-demo.mp4)). Recorded on v0.3.9, with game names blurred.
+
 ## Source and verified build
 
 The full source is in [`source/`](source/): GLM's own C code in `src/`, the web page in `web/index.html`, the home-tile files in `tile/`, and the build tools in `tools/`. Third-party code is in `third_party/`: Igor Pavlov's public-domain LZMA SDK (`.7z` support), zlib 1.3.2 and the compressor from libdeflate 1.26 (reading and rewriting `.ffpfsc` blocks). Each folder has its own licence file.
