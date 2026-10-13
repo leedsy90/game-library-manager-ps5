@@ -93,6 +93,39 @@ button:focus-visible,select:focus-visible,input:focus-visible,label.lib-item:foc
 .lib-item .grow{flex:1;min-width:0}
 .drive-head{margin:22px 0 8px;color:var(--body);font-size:.95rem;font-weight:700}
 .libcard{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:4px 20px}
+/* library cover grid */
+.covers{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:16px}
+.cover{position:relative;cursor:pointer;border-radius:var(--r2);background:var(--panel);border:1px solid var(--line);overflow:hidden;transition:transform .15s,border-color .15s}
+.cover:hover,.cover:focus-visible{transform:translateY(-3px);border-color:var(--accent);outline:none}
+.cover.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent)}
+.cover .art{aspect-ratio:1/1;background:var(--panel2);display:flex;align-items:center;justify-content:center;text-align:center;padding:0;color:var(--body);font-weight:700;font-size:.9rem;overflow:hidden}
+.cover .art img{width:100%;height:100%;object-fit:cover;display:block}
+.cover .art span{padding:12px;word-break:break-word}
+.cover .cap{padding:8px 10px 10px;font-size:.85rem;line-height:1.3;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cover .cap small{display:block;color:var(--dim);font-size:.72rem}
+.cover .flag{position:absolute;top:8px;left:8px;font-size:.68rem;font-weight:800;padding:4px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.4px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+.flag.fix{background:var(--bad);color:#fff}.flag.save{background:var(--warn);color:#111}.flag.extra{background:#2b2b36;color:var(--text);border:1px solid var(--line2)}
+.cover .pick{position:absolute;top:6px;right:6px;width:26px;height:26px;margin:0;accent-color:var(--accent)}
+.sub-head{margin:18px 0 8px;color:var(--dim);font-size:.85rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+/* game details */
+#gd{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.65);display:none;align-items:center;justify-content:center;padding:16px}
+#gd.open{display:flex}
+#gd .box{position:relative;background:#17171f;border:1px solid var(--line2);border-radius:20px;max-width:780px;width:100%;max-height:calc(100vh - 32px);overflow:auto;padding:22px;display:grid;grid-template-columns:200px 1fr;gap:22px}
+#gd .art{aspect-ratio:1/1;border-radius:var(--r2);background:var(--panel2);overflow:hidden;display:flex;align-items:center;justify-content:center;text-align:center;font-weight:700;color:var(--body)}
+#gd .art img{width:100%;height:100%;object-fit:cover}
+#gd h2{margin:0 34px 4px 0;font-size:1.35rem;line-height:1.25}
+#gd dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 14px;margin:12px 0;font-size:.92rem}
+#gd dt{color:var(--dim)}#gd dd{margin:0;word-break:break-all;color:var(--body)}
+#gd .actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px;align-items:center}
+#gd .dup{margin-top:14px;padding:14px;border-radius:var(--r2);background:rgba(255,107,99,.06);border:1px solid rgba(255,107,99,.3)}
+#gd .dup h3{margin:0 0 6px;font-size:1.05rem}
+#gd .dup-opt{display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line)}
+#gd .dup-opt.cur .badge{border-color:var(--accent)}
+#gd .dup-opt .grow{flex:1;min-width:0}
+#gd .dup-opt .path{word-break:break-all}
+@media (max-width:640px){#gd .dup-opt{flex-direction:column;align-items:stretch}}
+#gd .x{position:absolute;top:12px;right:12px;width:40px;height:40px;padding:0;font-size:1.3rem;line-height:1}
+@media (max-width:640px){#gd .box{grid-template-columns:1fr}#gd .art{max-width:180px}}
 .job-done{color:var(--ok)}.job-fail{color:var(--bad)}
 .pill{font-size:.85rem;font-weight:700;padding:6px 12px;border-radius:999px;background:var(--panel2);border:1px solid var(--line2);color:var(--body);text-align:center}
 .pill.ok{color:var(--ok);border-color:rgba(60,207,110,.35);background:rgba(60,207,110,.08)}
@@ -197,7 +230,7 @@ body.guiding #batch{display:none!important}
 
   <section class="view" data-view="library" id="libSec" hidden>
     <div class="vhead"><div><h1>Library <span id="lCount" class="count">0</span></h1>
-      <p>Every game on every drive. Tick games, pick a drive in the bar at the bottom, then press Move.</p></div></div>
+      <p>Every game on every drive. Press a game for its details and actions, or tick several and use the bar at the bottom to move, copy or delete them.</p></div></div>
     <div id="library"></div>
   </section>
 
@@ -231,8 +264,10 @@ body.guiding #batch{display:none!important}
   <select id="dest"></select>
   <button id="moveBtn" class="primary">Move</button>
   <button id="copyBtn">Copy</button>
+  <button id="delBtn" class="danger">Delete</button>
   <button id="selNone" class="small">Clear</button>
 </div></div>
+<div id="gd" role="dialog" aria-modal="true" aria-labelledby="gdTitle"><div class="box" id="gdBox"></div></div>
 <div id="toast"></div>
 <div id="guide" role="dialog" aria-labelledby="gTitle"><div class="sheet">
   <div class="step" id="gStep"></div>
@@ -325,7 +360,12 @@ function renderQueue(s){
   const order={running:0,queued:1,failed:2,cancelled:3,done:4};
   const sorted=[...jobs].sort((a,b)=> order[a.state]-order[b.state] || (a.state==="queued"?0:b.finished_ms-a.finished_ms));
   $("#queue").innerHTML = sorted.map(j=>{
-    const verb = {fix:"Fix",move:"Move",copy:"Copy",extract:"Extract"}[j.type];
+    const verb = {fix:"Fix",move:"Move",copy:"Copy",extract:"Extract",delete:"Delete"}[j.type];
+    if(j.type==="delete" && j.state==="running"){
+      return `<div class="card"><div class="row"><span class="badge">${verb}</span><span class="title">${esc(jobName(j))}</span>
+        <span class="tid">${esc(j.title_id)}</span><span class="spacer"></span><span class="pill">${j.state}</span></div>
+        <div class="path">${esc(j.src)}</div><div class="detail">${esc(j.phase||"deleting")}… ${j.bytes_total?fmtBytes(j.bytes_total)+", "+j.files_total+" files":""}</div></div>`;
+    }
     let extra="";
     if(j.state==="running"){
       const pct = j.bytes_total? j.bytes_done/j.bytes_total*100 : 0;
@@ -351,7 +391,7 @@ function renderQueue(s){
     }
     return `<div class="card"><div class="row"><span class="badge">${verb}</span><span class="title">${esc(jobName(j))}</span>
       <span class="tid">${esc(j.title_id)}</span><span class="spacer"></span><span class="pill">${j.state}</span></div>
-      <div class="path">${esc(j.src)}</div><div class="arrow">→ ${esc(j.dst)}</div>${extra}</div>`;
+      <div class="path">${esc(j.src)}</div>${j.dst?`<div class="arrow">→ ${esc(j.dst)}</div>`:""}${extra}</div>`;
   }).join("");
 }
 
@@ -371,6 +411,7 @@ function renderProblems(s){
       ${s.scan.smp_api && (g.issue==="too_deep"||g.issue==="outside_roots"||g.issue==="wrapped_folder")? `<button class="small" onclick="post('/api/manual?id=${g.id}')">Leave it, add to SMP list</button>`:""}
       ${g.kind==="archive"? `<button class="small primary" onclick="openArchive(${g.id})">Extract…</button>`:""}
       ${g.kind==="pkg"? `<button class="small" onclick="inspectPkg(${g.id})">Check if convertible</button>`:""}
+      ${dupGroup(g).length? `<button class="small primary" onclick="openGame(${g.id})">Choose which to keep…</button>`:""}
     </div><div id="ax-${g.id}"></div></div>`).join("");
 }
 
@@ -454,32 +495,166 @@ async function startExtract(id,ci){
   if(ok) $("#ax-"+id).innerHTML='<div class="detail st-ok">Queued. You can follow it in the Queue.</div>';
 }
 
+/* ---------- library: cover grid + details ---------- */
+const EXTRA_KINDS={leftovers:"Leftovers",extras:"Extras",backport:"Backport"};
+const isExtra=g=>!!EXTRA_KINDS[g.kind];
+const COVER_KINDS=["folder","exfat","ufs","pfs","pfsc"];
+const KIND_LABEL={folder:"Folder",exfat:"exFAT image",ufs:".ffpkg image",pfs:".ffpfs image",pfsc:".ffpfsc image",archive:"Archive",pkg:"Installer package",
+  leftovers:"Leftovers",extras:"Extras (fixes / backports / DLC)",backport:"Backport overlay"};
+const EXTRA_HELP={
+  leftovers:"What was left in a wrapper folder when <b>Fix</b> moved the game out of it: a readme, .nfo, or other folders from the release. Nothing in here is needed to play the game. Have a look, then delete it if you don't want it.",
+  extras:"Fixes, backports and DLC that <b>Extract</b> set aside from the release, outside ShadowMount's scan folders. They aren't used unless you put them somewhere yourself, so you can delete them if you don't need them.",
+  backport:"A backport overlay that ShadowMount puts on top of the game with the same title ID. Deleting it removes the backport, and a game that needs it (e.g. one made for newer firmware) may then not start."};
+function allItems(){ return [...(state?.scan.games||[]),...(state?.scan.extras||[])]; }
+function findItem(id){ return allItems().find(g=>g.id===id); }
+function coverUrl(g){ return `/api/cover?id=${g.id}&t=${encodeURIComponent(g.title_id+"-"+g.size+"-"+g.kind)}`; }
+function artHtml(g){
+  const name=esc(gameName(g));
+  return COVER_KINDS.includes(g.kind)
+    ? `<img loading="lazy" alt="" src="${coverUrl(g)}" data-n="${name}" onerror="const s=document.createElement('span');s.textContent=this.dataset.n;this.replaceWith(s)">`
+    : `<span>${name}</span>`;
+}
+function itemFlag(g){
+  if(isExtra(g)) return `<span class="flag extra">${EXTRA_KINDS[g.kind]}</span>`;
+  if(g.issue==="duplicate") return `<span class="flag fix">Duplicate</span>`;
+  if(g.issue!=="ok") return `<span class="flag fix">Needs fix</span>`;
+  if(g.savefix===1) return `<span class="flag save">Save fix</span>`;
+  return "";
+}
+function statusHtml(g){
+  if(isExtra(g)) return `<span>Not a game</span>`;
+  if(g.issue!=="ok") return `<span class="st-bad">✗ Needs fix: ${esc(g.issue.replace(/_/g," "))}</span>`;
+  if(!state.scan.smp_api) return `<span class="st-ok">✓ In the right place</span>`;
+  if(g.smp_sees) return `<span class="st-ok">✓ ShadowMount sees it${g.mounted?" (mounted)":""}</span>`;
+  return `<span class="st-warn">⚠ In the right place, but ShadowMount hasn't registered it yet</span>`;
+}
+function tileHtml(g){
+  return `<div class="cover ${sel.has(g.id)?"sel":""}" tabindex="0" data-id="${g.id}" role="button" aria-label="${esc(gameName(g))}">
+    <div class="art">${artHtml(g)}</div>${itemFlag(g)}
+    <input type="checkbox" class="pick" data-id="${g.id}" aria-label="Select ${esc(gameName(g))}" ${sel.has(g.id)?"checked":""}>
+    <div class="cap">${esc(gameName(g))}<small>${esc(g.title_id||KIND_LABEL[g.kind]||g.kind)} · ${gsize(g)}</small></div></div>`;
+}
 function renderLibrary(s){
-  const games=s.scan.games; $("#lCount").textContent=games.length;
-  if(!games.length){ $("#library").innerHTML='<div class="empty">'+(s.scan.running?"Scanning…":"No games found.")+'</div>'; return; }
+  const games=s.scan.games, extras=s.scan.extras||[]; $("#lCount").textContent=games.length;
+  if(!games.length && !extras.length){ $("#library").innerHTML='<div class="empty">'+(s.scan.running?"Scanning…":"No games found.")+'</div>'; return; }
   const byDrive={};
-  games.forEach(g=>(byDrive[g.drive]=byDrive[g.drive]||[]).push(g));
-  $("#library").innerHTML = Object.keys(byDrive).map(d=>{
-    const list=byDrive[d].sort((a,b)=>gameName(a).localeCompare(gameName(b)));
-    const total=list.reduce((n,g)=>n+g.size,0);
-    return `<div class="drive-head">${esc(driveLabel(d))} · ${list.length} item${list.length===1?"":"s"}, ${fmtBytes(total)}</div><div class="libcard">`+
-      list.map(g=>{
-        let st;
-        if(g.issue!=="ok") st=`<span class="st-bad">✗ ${esc(g.issue.replace(/_/g," "))}</span>`;
-        else if(!s.scan.smp_api) st=`<span class="st-ok">✓ in the right place</span>`;
-        else if(g.smp_sees) st=`<span class="st-ok">✓ ShadowMount sees it${g.mounted?" (mounted)":""}</span>`;
-        else st=`<span class="st-warn">⚠ In the right place, but ShadowMount hasn't registered it yet</span>`;
-        return `<label class="lib-item"><input type="checkbox" data-id="${g.id}" ${sel.has(g.id)?"checked":""}>
-          <div class="grow"><div class="row"><span class="title">${esc(gameName(g))}</span><span class="tid">${esc(g.title_id)}</span>
-          <span class="badge">${esc(g.kind)}</span></div>
-          <div class="path">${esc(g.path)}</div>
-          <div class="stats"><span>${gsize(g)}</span>${g.kind==="folder"&&g.size_state?`<span>${g.files} files</span>`:""}<span>${st}</span>
-          ${g.savefix===1?'<span class="st-warn">save fix available</span>':g.savefix===2?'<span class="st-ok">save fix on</span>':g.has_fakelib?'<span>has fakelib</span>':""}</div></div></label>`;
-      }).join("")+"</div>";
+  [...games,...extras].forEach(g=>(byDrive[g.drive]=byDrive[g.drive]||[]).push(g));
+  const order=g=>g.issue!=="ok"?0:g.savefix===1?1:2;
+  $("#library").innerHTML = Object.keys(byDrive).sort((a,b)=>(DRV_ORDER[a]??9)-(DRV_ORDER[b]??9)).map(d=>{
+    const list=byDrive[d], gs=list.filter(g=>!isExtra(g)).sort((a,b)=>order(a)-order(b)||gameName(a).localeCompare(gameName(b))),
+          xs=list.filter(isExtra).sort((a,b)=>a.kind.localeCompare(b.kind)||gameName(a).localeCompare(gameName(b)));
+    const total=gs.reduce((n,g)=>n+g.size,0), xtotal=xs.reduce((n,g)=>n+g.size,0);
+    return `<div class="drive-head">${esc(driveLabel(d))} · ${gs.length} game${gs.length===1?"":"s"}, ${fmtBytes(total)}</div>`+
+      (gs.length? `<div class="covers">${gs.map(tileHtml).join("")}</div>` : "")+
+      (xs.length? `<div class="sub-head">Leftovers, extras and backports · ${xs.length}, ${fmtBytes(xtotal)}</div><div class="covers">${xs.map(tileHtml).join("")}</div>` : "");
   }).join("");
-  document.querySelectorAll("#library input[type=checkbox]").forEach(cb=>cb.onchange=()=>{
-    const id=+cb.dataset.id; cb.checked? sel.add(id) : sel.delete(id); renderBatch();
+  document.querySelectorAll("#library .cover").forEach(el=>{
+    const id=+el.dataset.id, cb=el.querySelector(".pick");
+    cb.onclick=e=>e.stopPropagation();
+    cb.onchange=()=>{ cb.checked? sel.add(id) : sel.delete(id); el.classList.toggle("sel",cb.checked); renderBatch(); };
+    el.onclick=()=>openGame(id);
+    el.onkeydown=e=>{ if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openGame(id); } };
   });
+}
+
+function openGame(id){
+  const g=findItem(id); if(!g) return;
+  const extra=isExtra(g), s=state;
+  const dests=$("#dest").innerHTML;
+  let fakelib="";
+  if(g.savefix===1) fakelib=`<span class="st-warn">Save library in fakelib: save fix available</span>`;
+  else if(g.savefix===2) fakelib=`<span class="st-ok">✓ Save fix on</span>`;
+  else if(g.has_fakelib) fakelib=`Has a fakelib (no save library in it)`;
+  let sameId="";
+  if(g.kind==="backport" && g.title_id){ const m=s.scan.games.find(x=>x.title_id===g.title_id); if(m) sameId=esc(gameName(m)); }
+  $("#gdBox").innerHTML=`
+    <button class="x" onclick="closeGame()" aria-label="Close">×</button>
+    <div class="art">${artHtml(g)}</div>
+    <div>
+      <h2 id="gdTitle">${esc(gameName(g))}</h2>
+      <div>${statusHtml(g)}</div>
+      ${!extra&&g.issue!=="ok"&&g.detail? `<div class="detail st-warn" style="margin-top:8px">${esc(g.detail)}</div>`:""}
+      ${!extra&&g.fix_dst? `<div class="arrow">Fix moves it to → ${esc(g.fix_dst)}</div>`:""}
+      ${extra? `<div class="detail" style="margin-top:8px">${EXTRA_HELP[g.kind]}${sameId?` Belongs with <b>${sameId}</b>.`:""}</div>`:""}
+      ${dupHtml(g)}
+      <dl>
+        ${g.title_id?`<dt>Title ID</dt><dd>${esc(g.title_id)}</dd>`:""}
+        <dt>Type</dt><dd>${esc(KIND_LABEL[g.kind]||g.kind)}</dd>
+        <dt>Drive</dt><dd>${esc(driveLabel(g.drive))}</dd>
+        <dt>Path</dt><dd>${esc(g.path)}</dd>
+        <dt>Size</dt><dd>${gsize(g)}${g.size_state&&g.files>1?` · ${g.files} files`:""}</dd>
+        ${fakelib?`<dt>Fakelib</dt><dd>${fakelib}</dd>`:""}
+      </dl>
+      <div class="actions">
+        ${!extra&&g.fix_dst? `<button class="primary" onclick="post('/api/job?action=fix&id=${g.id}');closeGame()">Fix (move here)</button>`:""}
+        ${!extra&&s.scan.smp_api&&(g.issue==="too_deep"||g.issue==="outside_roots"||g.issue==="wrapped_folder")? `<button onclick="post('/api/manual?id=${g.id}');closeGame()">Leave it, add to SMP list</button>`:""}
+        ${g.kind==="archive"||g.kind==="pkg"? `<button onclick="closeGame();showView('attention')">${g.kind==="archive"?"Extract… (in Needs attention)":"Check if convertible (in Needs attention)"}</button>`:""}
+        ${g.savefix===1? `<button class="primary" onclick="post('/api/savefix?id=${g.id}');closeGame()">Apply save fix</button>`:""}
+        ${g.savefix===2? `<button onclick="post('/api/savefix?id=${g.id}&undo=1');closeGame()">Undo save fix</button>`:""}
+      </div>
+      ${!extra&&g.kind!=="archive"&&g.kind!=="pkg"? `<div class="actions"><select id="gdDest" aria-label="Destination">${dests}</select>
+        <button onclick="moveOne(${g.id},'move')">Move</button><button onclick="moveOne(${g.id},'copy')">Copy</button></div>`:""}
+      <div class="actions"><button class="danger" onclick="confirmDelete([${g.id}])">Delete…</button></div>
+    </div>`;
+  $("#gd").classList.add("open");
+  $("#gdBox").querySelector(".x").focus();
+}
+/* every copy of the same game (same title ID) that could be kept */
+function dupGroup(g){
+  if(!g.title_id || isExtra(g) || g.kind==="archive" || g.kind==="pkg") return [];
+  const grp=(state?.scan.games||[]).filter(x=>x.title_id===g.title_id && x.kind!=="archive" && x.kind!=="pkg");
+  return grp.length>1? grp : [];
+}
+function dupHtml(g){
+  const grp=dupGroup(g); if(!grp.length) return "";
+  return `<div class="dup"><h3>Duplicate: which format should we keep?</h3>
+    <p class="detail">This game is on your drives ${grp.length} times. ShadowMount only uses one of them. Keep one and the other${grp.length>2?"s are":" is"} deleted.</p>
+    ${grp.map(x=>`<div class="dup-opt${x.id===g.id?" cur":""}">
+      <div class="grow"><div class="row"><span class="badge">${esc(KIND_LABEL[x.kind]||x.kind)}</span>
+        ${x.smp_sees?`<span class="st-ok">✓ ShadowMount is using this one${x.mounted?" (mounted)":""}</span>`:""}</div>
+        <div class="path">${esc(driveLabel(x.drive))} · ${esc(x.path)}</div>
+        <div class="stats"><span>${gsize(x)}</span>${x.savefix===2?'<span class="st-ok">save fix on</span>':x.savefix===1?'<span class="st-warn">save fix available</span>':""}</div></div>
+      <button class="primary" onclick="keepOnly(${x.id})">Keep this one</button></div>`).join("")}</div>`;
+}
+async function keepOnly(keepId){
+  const keep=findItem(keepId); if(!keep) return;
+  const others=dupGroup(keep).filter(x=>x.id!==keepId); if(!others.length) return;
+  const lines=others.map(x=>`• ${KIND_LABEL[x.kind]||x.kind} (${gsize(x)})\n   ${x.path}`).join("\n");
+  const inUse=others.filter(x=>x.smp_sees).length;
+  if(!confirm(`Keep the ${KIND_LABEL[keep.kind]||keep.kind}?\n   ${keep.path}\n\nThis deletes ${others.length===1?"the other copy":`the other ${others.length} copies`} for good:\n${lines}`+
+     (inUse?`\n\nShadowMount is using the copy being deleted, so the game leaves your home screen until ShadowMount picks up the one you keep (press Rescan in ShadowMount if it doesn't).`:""))) return;
+  let ok=0, msgs=[];
+  for(const x of others){
+    const r=await fetch(`/api/job?action=delete&id=${x.id}&confirm=1`,{method:"POST"}).then(r=>r.json()).catch(()=>({ok:false,message:"network"}));
+    if(r.ok) ok++; else msgs.push(r.message);
+  }
+  closeGame();
+  toast(ok? `Keeping the ${KIND_LABEL[keep.kind]||keep.kind}: ${ok} delete${ok===1?"":"s"} queued`+(msgs.length?" · "+msgs[0]:"") : (msgs[0]||"Nothing queued"));
+  refresh.sig=null; refresh();
+}
+function closeGame(){ $("#gd").classList.remove("open"); }
+$("#gd").onclick=e=>{ if(e.target.id==="gd") closeGame(); };
+document.addEventListener("keydown",e=>{ if(e.key==="Escape"&&$("#gd").classList.contains("open")) closeGame(); });
+async function moveOne(id,action){
+  const root=$("#gdDest")?.value; if(!root){ toast("Pick a destination"); return; }
+  if(action==="copy" && !confirm("Copy keeps the original, so SMP will see two copies with the same title ID. Continue?")) return;
+  if(await post(`/api/job?action=${action}&id=${id}&root=${encodeURIComponent(root)}`)) closeGame();
+}
+async function confirmDelete(ids){
+  const items=ids.map(findItem).filter(Boolean); if(!items.length) return;
+  const total=items.reduce((n,g)=>n+(g.size||0),0);
+  const lines=items.slice(0,12).map(g=>`• ${gameName(g)} (${gsize(g)})\n   ${g.path}`).join("\n")+(items.length>12?`\n…and ${items.length-12} more`:"");
+  const seen=items.filter(g=>g.smp_sees).length;
+  if(!confirm(`Delete ${items.length} item${items.length===1?"":"s"} for good? This can't be undone.\n\n${lines}\n\nTotal: ${fmtBytes(total)}`+
+     (seen?`\n\n${seen} of these ${seen===1?"is":"are"} on your home screen through ShadowMount and will disappear from it.`:""))) return;
+  let ok=0, msgs=[];
+  for(const g of items){
+    const r=await fetch(`/api/job?action=delete&id=${g.id}&confirm=1`,{method:"POST"}).then(r=>r.json()).catch(()=>({ok:false,message:"network"}));
+    if(r.ok){ ok++; sel.delete(g.id); } else msgs.push(r.message);
+  }
+  closeGame(); renderBatch();
+  toast(`${ok} delete${ok===1?"":"s"} queued`+(msgs.length? " · "+msgs[0]:""));
+  refresh.sig=null; refresh();
 }
 
 function renderFakelib(s){
@@ -561,9 +736,12 @@ async function queueSelected(action){
 async function refresh(){
   try{
     const s = await fetch("/api/state",{cache:"no-store"}).then(r=>r.json());
+    /* leftovers / extras / backports aren't games: only the Library lists them */
+    s.scan.extras = s.scan.games.filter(isExtra);
+    s.scan.games = s.scan.games.filter(g=>!isExtra(g));
     state=s;
     renderHeader(s); renderDrives(s); renderQueue(s); renderTile(s);
-    const sig = s.scan.finished_ms+":"+s.scan.running+":"+s.scan.games.map(g=>g.size_state).join("");
+    const sig = s.scan.finished_ms+":"+s.scan.running+":"+s.scan.games.map(g=>g.size_state).join("")+":"+s.scan.extras.map(g=>g.size_state).join("");
     if(sig!==refresh.sig){ refresh.sig=sig; renderProblems(s); renderLibrary(s); renderFakelib(s); renderPush(s); }
     guideLive();
     if(!guideAuto){ guideAuto=true; if(!s.guide_done) guideShow(0); }
@@ -694,6 +872,7 @@ $("#stopBtn").onclick=()=>{
 $("#sfAllBtn").onclick=()=>{ if(confirm("Apply the save fix to every game that has a save library in its fakelib? You can undo it per game.")) post("/api/savefix?id=all"); };
 $("#moveBtn").onclick=()=>queueSelected("move");
 $("#copyBtn").onclick=()=>{ if(confirm("Copy keeps the original, so SMP will see two copies with the same title ID. Continue?")) queueSelected("copy"); };
+$("#delBtn").onclick=()=>confirmDelete([...sel]);
 $("#selNone").onclick=()=>{ sel.clear(); renderBatch(); refresh.sig=null; refresh(); };
 
 (function loop(){ refresh().finally(()=>{ const busy=state&&state.queue.running; setTimeout(loop, busy?1500:4000); }); })();

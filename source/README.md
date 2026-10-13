@@ -1,4 +1,4 @@
-# Game Library Manager 0.4.0 (PS5 payload)
+# Game Library Manager 0.5.0 (PS5 payload)
 
 A companion to ShadowMount Plus (SMP). It finds games that SMP can't see because they're in the wrong folder, fixes them, and moves or copies games between drives in a batch queue. It pops up a PS5 notification and (optionally) a phone push on every job.
 
@@ -30,7 +30,7 @@ The first time the page opens (on the PS5 or your phone), a short guide walks th
 | Section | What you get |
 | --- | --- |
 | **Needs attention** | Every game SMP won't pick up, with the reason and a suggested spot: too deep, extra wrapper folder, outside every scan folder, name starting with a dot, sitting in `backports`, or duplicate title IDs. It also looks *inside* `.exfat` and `.ffpkg` images (read-only, without mounting them) to catch images that have an extra top-level folder. **Fix** queues an instant rename on the same drive. **Fix all** queues the lot. |
-| **Library** | Every game on every drive. With SMP 1.7's API it also shows whether SMP actually sees each one. Tick several games, pick a drive, then **Move** or **Copy**. |
+| **Library** | Every game on every drive as a grid of covers, with **Needs fix**, **Duplicate** and **Save fix** badges. With SMP 1.7's API it also shows whether SMP actually sees each one. Press a cover for its details and actions (Fix, Move, Copy, Delete, save fix, which duplicate to keep). Tick several covers to **Move**, **Copy** or **Delete** them together. Leftovers, extras and backports are listed in their own section so they can be deleted. |
 | **Queue** | Runs one job at a time in the background, so you can close the page. It shows live MB/s, files done and time left. You can cancel, reorder or pause. It survives a crash or reboot: an interrupted job is restarted from scratch when you reload the payload. **Stop batch** cancels the job in progress (its partial copy is deleted and the original stays put) plus everything still waiting. Games that already finished are never touched or rolled back. |
 | **Save fix** | For backported games that won't save. Finds games whose `fakelib` contains a save library (`libSceSaveData*.sprx`). **Apply save fix** renames it to `.disabled` (inside `.exfat`, `.ffpfs` and `.ffpfsc` images: `.soff`) so the console's own save library is used instead. Nothing is deleted, **Undo** reverses it, and it takes effect the next time the game starts. **Apply to all** does every affected game. Individual fakelib files are under *Advanced*. |
 
@@ -115,7 +115,7 @@ Game Library Manager checks SMP every scan and shows a banner at the top of the 
 
 In all of these, finding, fixing and moving games still work; only the "does SMP see it?" checks are switched off.
 
-## Limits in 0.4.0
+## Limits in 0.5.0
 
 - It looks inside `.ffpfs` / `.ffpfsc` images that hold an exFAT image (what PS5 FFPFSC PRO / MkPFS make, from folders and from `.exfat`). Other PFS images (signed, encrypted or without an exFAT inside) are still only checked for where they sit.
 - Verification needs SMP 1.7 with its API enabled (`api_enabled=1`, the default). Without it, everything else still works.

@@ -22,10 +22,11 @@ static char g_qfile[SS_MAX_PATH];
 static int g_batch_done = 0, g_batch_failed = 0;
 
 static const char *type_name(job_type_t t) {
-  return t == JOB_FIX    ? "fix"
-         : t == JOB_COPY ? "copy"
-         : t == JOB_MOVE ? "move"
-                         : "extract";
+  return t == JOB_FIX      ? "fix"
+         : t == JOB_COPY   ? "copy"
+         : t == JOB_MOVE   ? "move"
+         : t == JOB_DELETE ? "delete"
+                           : "extract";
 }
 static const char *state_name(job_state_t s) {
   switch (s) {
@@ -151,7 +152,9 @@ static int queue_add_ex(job_type_t type, const char *src, const char *dst,
     snprintf(err, errsz, "source not found: %s", src);
     return -1;
   }
-  if (path_exists(dst)) {
+  if (type == JOB_DELETE)
+    dst = "";
+  else if (path_exists(dst)) {
     /* allowed only for the wrapper case: dst is the folder around src */
     char parent[SS_MAX_PATH];
     if (!(type == JOB_FIX && path_dirname(src, parent, sizeof(parent)) &&
@@ -168,7 +171,8 @@ static int queue_add_ex(job_type_t type, const char *src, const char *dst,
   for (int i = 0; i < g_njobs; i++) {
     job_t *o = &g_jobs[i];
     if ((o->state == JS_QUEUED || o->state == JS_RUNNING) &&
-        (!strcmp(o->src, src) || !strcmp(o->dst, dst))) {
+        (!strcmp(o->src, src) || (dst[0] && !strcmp(o->dst, dst)) ||
+         (type == JOB_DELETE && !strcmp(o->dst, src)))) {
       pthread_mutex_unlock(&g_qlock);
       snprintf(err, errsz, "already queued (job %d)", o->id);
       return -1;
@@ -471,7 +475,9 @@ static int delete_source(job_t *j, char *err, size_t errsz) {
       return 0;
     }
   }
-  ss_log("job %d: deleting original %s (copy verified)", j->id, j->src);
+  ss_log(j->type == JOB_DELETE ? "job %d: deleting %s (asked for on the page)"
+                               : "job %d: deleting original %s (copy verified)",
+         j->id, j->src);
   if (rm_rf(j->src) != 0) {
     snprintf(err, errsz, "couldn't fully delete source: %s", strerror(errno));
     return -1;
@@ -519,7 +525,99 @@ static int do_rename(job_t *j, char *err, size_t errsz) {
   return 0;
 }
 
+/* Only delete something inside a drive: never a drive itself, a scan
+ * folder, a backports/game-extras folder as a whole, or system areas. */
+static bool delete_allowed(const char *path, char *err, size_t errsz) {
+  char p[SS_MAX_PATH];
+  snprintf(p, sizeof(p), "%s", path);
+  size_t l = strlen(p);
+  while (l > 1 && p[l - 1] == '/')
+    p[--l] = 0;
+  const char *base = path_basename(p);
+  if (p[0] != '/' || strstr(p, "/../") || strstr(p, "/./") ||
+      !strcmp(base, "..") || !strcmp(base, ".") || !strcmp(base, "backports") ||
+      !strcmp(base, "game-extras") || !strcmp(base, "homebrew")) {
+    snprintf(err, errsz, "refusing to delete %s", p);
+    return false;
+  }
+  static const char *protect[] = {"/data/shadowmount", "/data/game-library-manager",
+                                  "/data/etaHEN", "/user", "/system",
+                                  "/system_ex", "/preinst"};
+  for (size_t i = 0; i < sizeof(protect) / sizeof(protect[0]); i++)
+    if (!strcmp(p, protect[i]) ||
+        (strcmp(protect[i], "/data/etaHEN") && path_is_under(protect[i], p))) {
+      snprintf(err, errsz, "refusing to delete %s (system area)", p);
+      return false;
+    }
+  drive_info_t dr[16];
+  int nd = plat_list_drives(dr, 16);
+  bool inside = false;
+  for (int i = 0; i < nd; i++) {
+    if (!strcmp(dr[i].mount, p)) {
+      snprintf(err, errsz, "refusing to delete a whole drive");
+      return false;
+    }
+    if (path_is_under(dr[i].mount, p))
+      inside = true;
+  }
+  smp_model_t m;
+  smp_model_load(&m);
+  for (int i = 0; i < m.count; i++)
+    if (!strcmp(m.roots[i], p)) {
+      snprintf(err, errsz, "refusing to delete a ShadowMount scan folder");
+      return false;
+    }
+  if (!inside)
+    snprintf(err, errsz, "%s isn't on a known drive", p);
+  return inside;
+}
+
+static void run_delete(job_t *jcopy) {
+  job_t j = *jcopy;
+  char err[256] = "";
+  memset(&g_progress, 0, sizeof(g_progress));
+  set_phase(j.id, "measuring");
+  measure_tree_ex(j.src, &g_progress.bytes_total, &g_progress.files_total,
+                  60000, NULL, 0);
+  int rc = -1;
+  if (!path_exists(j.src)) {
+    snprintf(err, sizeof(err), "already gone: %s", j.src);
+  } else if (delete_allowed(j.src, err, sizeof(err))) {
+    set_phase(j.id, "deleting");
+    rc = delete_source(&j, err, sizeof(err));
+  }
+  pthread_mutex_lock(&g_qlock);
+  job_t *live = find_locked(j.id);
+  if (live) {
+    live->finished_ms = now_ms();
+    live->bytes_total = g_progress.bytes_total;
+    live->files_total = g_progress.files_total;
+    live->bytes_done = rc ? 0 : g_progress.bytes_total;
+    live->files_done = rc ? 0 : g_progress.files_total;
+    live->phase[0] = 0;
+    if (rc) {
+      live->state = JS_FAILED;
+      snprintf(live->message, sizeof(live->message), "%s", err);
+    } else {
+      char sz[32];
+      unsigned long long nf = (unsigned long long)g_progress.files_total;
+      human_bytes(g_progress.bytes_total, sz, sizeof(sz));
+      live->state = JS_DONE;
+      snprintf(live->message, sizeof(live->message), "Deleted %s, %llu file%s",
+               sz, nf, nf == 1 ? "" : "s");
+    }
+    *jcopy = *live;
+  }
+  g_running_id = 0;
+  save_locked();
+  pthread_mutex_unlock(&g_qlock);
+}
+
 static void run_job(job_t *jcopy) {
+  if (jcopy->type == JOB_DELETE) {
+    run_delete(jcopy);
+    return;
+  }
   job_t j = *jcopy;
   char err[256] = "";
   int rc = 0;
@@ -735,6 +833,7 @@ static void *worker_main(void *arg) {
     notify_event(j.type == JOB_FIX       ? "Fixing"
                  : j.type == JOB_COPY    ? "Copying"
                  : j.type == JOB_EXTRACT ? "Extracting"
+                 : j.type == JOB_DELETE  ? "Deleting"
                                          : "Moving",
                  msg, false);
 

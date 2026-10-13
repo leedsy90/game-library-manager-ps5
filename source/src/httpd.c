@@ -84,6 +84,54 @@ static void send_resp(int fd, int code, const char *ctype, const char *body,
   }
 }
 
+/* Cover art for the Library: the game's sce_sys/icon0.png, from its folder
+ * or from inside its image. The URL carries the title ID and size, so the
+ * browser may keep it for a day. */
+#define COVER_MAX (4 * 1024 * 1024)
+static void send_cover(int fd, const char *q) {
+  char idbuf[16];
+  query_get(q, "id", idbuf, sizeof(idbuf));
+  game_t g;
+  uint8_t *buf = NULL;
+  size_t len = 0;
+  if (scan_get_game(atoi(idbuf), &g)) {
+    if (!strcmp(g.kind, "folder")) {
+      char p[SS_MAX_PATH + 32];
+      snprintf(p, sizeof(p), "%s/sce_sys/icon0.png", g.path);
+      int f = open(p, O_RDONLY);
+      struct stat st;
+      if (f >= 0 && fstat(f, &st) == 0 && st.st_size > 0 &&
+          st.st_size <= COVER_MAX && (buf = malloc((size_t)st.st_size))) {
+        ssize_t r = read(f, buf, (size_t)st.st_size);
+        len = r > 0 ? (size_t)r : 0;
+      }
+      if (f >= 0)
+        close(f);
+    } else if (image_kind(g.path)) {
+      buf = image_read_file(g.path, "sce_sys/icon0.png", COVER_MAX, &len);
+    }
+  }
+  if (buf && len >= 8 && !memcmp(buf, "\x89PNG", 4)) {
+    char hdr[256];
+    int n = snprintf(hdr, sizeof(hdr),
+                     "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\n"
+                     "Content-Length: %zu\r\nCache-Control: max-age=86400\r\n"
+                     "Connection: close\r\n\r\n",
+                     len);
+    send(fd, hdr, (size_t)n, 0);
+    size_t off = 0;
+    while (off < len) {
+      ssize_t w = send(fd, buf + off, len - off, 0);
+      if (w <= 0)
+        break;
+      off += (size_t)w;
+    }
+  } else {
+    send_resp(fd, 404, "text/plain", "no cover", 8);
+  }
+  free(buf);
+}
+
 static void send_json_msg(int fd, bool ok, const char *msg) {
   sbuf_t b;
   sb_init(&b);
@@ -207,6 +255,15 @@ static void handle_job(int fd, const char *q) {
     path_join(dst, sizeof(dst), root, path_basename(g.path));
     id = queue_add(!strcmp(action, "move") ? JOB_MOVE : JOB_COPY, g.path, dst,
                    g.title_id, g.title, err, sizeof(err));
+  } else if (!strcmp(action, "delete")) {
+    char confirm[8] = "";
+    query_get(q, "confirm", confirm, sizeof(confirm));
+    if (strcmp(confirm, "1")) {
+      send_json_msg(fd, false, "delete needs confirming");
+      return;
+    }
+    id = queue_add(JOB_DELETE, g.path, "", g.title_id, g.title, err,
+                   sizeof(err));
   } else {
     send_json_msg(fd, false, "unknown action");
     return;
@@ -357,6 +414,8 @@ static void handle(int fd) {
     state_json(&b);
     send_resp(fd, 200, "application/json", b.data, b.len);
     sb_free(&b);
+  } else if (!strcmp(path, "/api/cover")) {
+    send_cover(fd, q ? q : "");
   } else if (!strcmp(path, "/api/archive")) {
     /* what's inside a .7z: /api/archive?id=N */
     char idbuf[16];

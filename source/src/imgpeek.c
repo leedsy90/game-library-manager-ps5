@@ -970,6 +970,55 @@ int image_list_dir(const char *path, const char *subdir, char *out,
   return n;
 }
 
+uint8_t *image_read_file(const char *path, const char *file, size_t maxlen,
+                         size_t *outlen) {
+  *outlen = 0;
+  img_t im;
+  if (!img_open(&im, path, false, NULL))
+    return NULL;
+  dent_t *ents = calloc(MAX_DENTS, sizeof(dent_t));
+  uint8_t *buf = NULL;
+  dent_t cur;
+  bool have_dir = false, found = false;
+  char parts[256];
+  snprintf(parts, sizeof(parts), "%s", file);
+  char *save = NULL;
+  for (char *p = strtok_r(parts, "/", &save); p && ents;
+       p = strtok_r(NULL, "/", &save)) {
+    int n = img_list(&im, have_dir ? &cur : NULL, ents, MAX_DENTS);
+    bool last = save == NULL || *save == 0;
+    const dent_t *d = n > 0 ? find(ents, n, p, !last) : NULL;
+    if (!d)
+      break;
+    cur = *d;
+    have_dir = true;
+    found = last;
+  }
+  if (found) {
+    size_t len = 0;
+    if (im.is_exfat) {
+      if (cur.size && cur.size <= maxlen)
+        buf = exfat_read_chain(&im.x, (uint32_t)cur.ref, cur.size, cur.contig,
+                               maxlen, &len);
+    } else {
+      uint8_t di[256];
+      /* the UFS reader follows direct blocks only, so skip bigger files */
+      if (ufs_inode(&im.u, cur.ref, di) && le64(di + 16) <= maxlen &&
+          le64(di + 16) <= 12ull * (uint64_t)im.u.bsize)
+        buf = ufs_read(&im.u, di, maxlen, &len);
+    }
+    if (buf && len)
+      *outlen = len;
+    else {
+      free(buf);
+      buf = NULL;
+    }
+  }
+  free(ents);
+  img_close(&im);
+  return buf;
+}
+
 /* ================================================================== */
 /* exFAT: rename one file inside an image, in place, same name length.  */
 /*                                                                      */

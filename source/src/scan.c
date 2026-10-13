@@ -358,6 +358,49 @@ static void add_other(walk_ctx_t *c, const char *path, const char *dir,
   g_scan.found++;
 }
 
+/* Not games: things that sit next to games, listed so they can be seen and
+ * deleted, and kept out of every game check.
+ *   leftovers  <wrapper>.leftovers, what Fix left of a wrapper folder
+ *   extras     <drive>/game-extras/<id>, fixes/backports/DLC from Extract
+ *   backport   <...>/backports/<id>, ShadowMount backport overlays */
+bool is_extra_kind(const char *kind) {
+  return !strcmp(kind, "leftovers") || !strcmp(kind, "extras") ||
+         !strcmp(kind, "backport");
+}
+
+static void add_extra(walk_ctx_t *c, const char *path, const char *kind) {
+  game_t *g = new_game(c, path, kind);
+  if (!g)
+    return;
+  const char *b = path_basename(path);
+  find_title_id(b, g->title_id);
+  snprintf(g->title, sizeof(g->title), "%s", b);
+  struct stat st;
+  if (stat(path, &st) == 0 && S_ISREG(st.st_mode)) {
+    g->size = (uint64_t)st.st_size; /* folders are measured after the scan */
+    g->files = 1;
+    g->size_state = 1;
+  }
+  ss_log("  %s %s", kind, path);
+}
+
+static void add_extras_in(walk_ctx_t *c, const char *dir, const char *kind) {
+  DIR *d = opendir(dir);
+  if (!d)
+    return;
+  struct dirent *e;
+  while ((e = readdir(d))) {
+    if (e->d_name[0] == '.')
+      continue;
+    char p[SS_MAX_PATH];
+    struct stat st;
+    if (path_join(p, sizeof(p), dir, e->d_name) && lstat(p, &st) == 0 &&
+        (S_ISDIR(st.st_mode) || S_ISREG(st.st_mode)))
+      add_extra(c, p, kind);
+  }
+  closedir(d);
+}
+
 static void walk(walk_ctx_t *c, const char *dir, int depth) {
   if (depth > g_cfg.walk_depth)
     return;
@@ -391,6 +434,14 @@ static void walk(walk_ctx_t *c, const char *dir, int depth) {
       continue;
     if ((uint64_t)st.st_dev != c->drive->dev)
       continue; /* another filesystem mounted inside: skip */
+    if (ends_with_ci(e->d_name, ".leftovers")) {
+      add_extra(c, p, "leftovers");
+      continue;
+    }
+    if (!strcmp(e->d_name, "backports") || !strcmp(e->d_name, "game-extras")) {
+      add_extras_in(c, p, e->d_name[0] == 'b' ? "backport" : "extras");
+      continue;
+    }
     if (!strcmp(e->d_name, "sce_sys") || !strcmp(e->d_name, "fakelib") ||
         !strcmp(e->d_name, "backports") ||
         !strcmp(e->d_name, "System Volume Information") ||
@@ -418,7 +469,8 @@ static void walk(walk_ctx_t *c, const char *dir, int depth) {
 }
 
 static void classify(game_t *g, const smp_model_t *m) {
-  if (g->issue == ISSUE_PKG || g->issue == ISSUE_ARCHIVE)
+  if (g->issue == ISSUE_PKG || g->issue == ISSUE_ARCHIVE ||
+      is_extra_kind(g->kind))
     return;
   g->visible = smp_would_see(m, g->path);
   if (g->visible || g->issue == ISSUE_IMAGE_WRAPPED ||
@@ -608,7 +660,9 @@ static void size_folders(void) {
     char path[SS_MAX_PATH];
     bool todo = false;
     pthread_mutex_lock(&g_scan.lock);
-    if (i < g_scan.count && !strcmp(g_scan.games[i].kind, "folder") &&
+    if (i < g_scan.count &&
+        (!strcmp(g_scan.games[i].kind, "folder") ||
+         is_extra_kind(g_scan.games[i].kind)) &&
         g_scan.games[i].size_state == 0) {
       snprintf(path, sizeof(path), "%s", g_scan.games[i].path);
       todo = true;

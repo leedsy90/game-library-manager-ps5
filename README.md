@@ -1,4 +1,4 @@
-# Game Library Manager (PS5) v0.4.0
+# Game Library Manager (PS5) v0.5.0
 
 By [leedsy90](https://github.com/leedsy90)
 
@@ -8,8 +8,8 @@ A PS5 homebrew payload that keeps your game library tidy for **ShadowMount Plus 
 
 | | |
 |---|---|
-| Download | [`glm-0.4.0.elf`](https://github.com/leedsy90/game-library-manager-ps5/releases/latest) (Releases) |
-| SHA-256 | `cd70ac6a8f84799625d3d93666ff2675ce24ff3196bdf1ff1b4782f82da7c9b5` |
+| Download | [`glm-0.5.0.elf`](https://github.com/leedsy90/game-library-manager-ps5/releases/latest) (Releases) |
+| SHA-256 | `79343fc3074124b45ba165f7800a72ae2710ccb13d10f5493fd9f68a7db20d8e` |
 | Format | ELF64 x86-64 PIE, built with clang 18 and [ps5-payload-sdk](https://github.com/ps5-payload-dev/sdk) v0.43 |
 | Source | [`source/`](source/), with a [reproducible build](#source-and-verified-build) |
 | Licence | GPL-3.0-or-later ([LICENSE](LICENSE)) |
@@ -25,7 +25,7 @@ A 90-second walkthrough of the web page: Overview, Needs attention, Library, Que
 
 The full source is in [`source/`](source/): GLM's own C code in `src/`, the web page in `web/index.html`, the home-tile files in `tile/`, and the build tools in `tools/`. Third-party code is in `third_party/`: Igor Pavlov's public-domain LZMA SDK (`.7z` support), zlib 1.3.2 and the compressor from libdeflate 1.26 (reading and rewriting `.ffpfsc` blocks). Each folder has its own licence file.
 
-**The published `glm-0.4.0.elf` is a byte-for-byte reproducible build of this source.** You don't have to trust the binary. Rebuild it yourself and compare:
+**The published `glm-0.5.0.elf` is a byte-for-byte reproducible build of this source.** You don't have to trust the binary. Rebuild it yourself and compare:
 
 ```sh
 git clone https://github.com/leedsy90/game-library-manager-ps5
@@ -33,10 +33,10 @@ cd game-library-manager-ps5
 sh reproduce-build.sh
 ```
 
-[`reproduce-build.sh`](reproduce-build.sh) needs Docker. It uses a clean Ubuntu 24.04 container (clang 18.1.3) and ps5-payload-sdk v0.43, builds `source/`, and checks the result against `glm-0.4.0.elf`. It prints `MATCH` when the two are identical. The expected SHA-256 is:
+[`reproduce-build.sh`](reproduce-build.sh) needs Docker. It uses a clean Ubuntu 24.04 container (clang 18.1.3) and ps5-payload-sdk v0.43, builds `source/`, and checks the result against `glm-0.5.0.elf`. It prints `MATCH` when the two are identical. The expected SHA-256 is:
 
 ```
-cd70ac6a8f84799625d3d93666ff2675ce24ff3196bdf1ff1b4782f82da7c9b5
+79343fc3074124b45ba165f7800a72ae2710ccb13d10f5493fd9f68a7db20d8e
 ```
 
 To build it yourself without Docker:
@@ -49,8 +49,8 @@ cd source && make
 ## Getting started
 
 1. Load ShadowMount Plus first. This is optional, but without it the SMP checks are switched off.
-2. Download `glm-0.4.0.elf` from the [latest release](https://github.com/leedsy90/game-library-manager-ps5/releases/latest) and send it to your ELF loader, usually on port 9021.
-3. A notification appears: **"Game Library Manager 0.4.0 ready – Open http://&lt;ps5-ip&gt;:8095"**.
+2. Download `glm-0.5.0.elf` from the [latest release](https://github.com/leedsy90/game-library-manager-ps5/releases/latest) and send it to your ELF loader, usually on port 9021.
+3. A notification appears: **"Game Library Manager 0.5.0 ready – Open http://&lt;ps5-ip&gt;:8095"**.
 4. Open that address on your phone or PC. You can also use the **Game Library Manager** tile it adds to the home screen.
 
 If you load it a second time while it's already running, it opens the page instead of starting another copy.
@@ -66,7 +66,9 @@ If you load it a second time while it's already running, it opens the page inste
   - its name is hidden (starts with a dot) or it's sitting in `backports/`
   - its title ID is duplicated, or it's still inside an archive
 
-  Each problem has a one-click fix: **Fix (move here)** or **Add to SMP's manual list**.
+  Each problem has a one-click fix: **Fix (move here)** or **Add to SMP's manual list**. For duplicates, **Choose which to keep…** shows every copy side by side (format, drive, path, size, and which one ShadowMount is using) and asks which format to keep; the others are deleted.
+- **Library.** A grid of game covers (each game's `icon0.png`, read from folders and from inside `.exfat`, `.ffpkg` and `.ffpfsc` images), grouped by drive. Badges show **Needs fix**, **Duplicate** or **Save fix** at a glance. Press a cover for its details and every action: Fix, Move, Copy, Delete, save fix, or choosing which duplicate to keep. Tick several covers to move, copy or delete them together.
+- **Leftovers, extras and backports.** Listed in the Library in their own section, so you can see what they are and delete them: `*.leftovers` (what Fix left of a wrapper folder), `game-extras/` (fixes, backports and DLC set aside by Extract) and `backports/` overlays.
 - **Move and copy queue.**
   - Moves on the same drive are instant.
   - Moves to another drive are staged, checked, then renamed into place. The original is only deleted after the copy has been checked.
@@ -101,7 +103,7 @@ The log is written to `/data/game-library-manager/game-library-manager.log`.
 
 - **No password.** The web UI has no login. Anyone on your local network can open it while the payload is running, so only use it on a network you trust.
 - **Connections.** It only talks to `127.0.0.1` (SMP's API and its own server) and to any ntfy or webhook URL you set yourself. There is no telemetry and no auto-update.
-- **Deleting files.** It can delete originals after a checked move, archives after a checked extraction, and games through SMP. Every one of these is a button you press, never automatic.
+- **Deleting files.** It can delete games and leftovers from the Library, the other copies of a duplicate, originals after a checked move, and archives after a checked extraction. Every delete is a button you press and confirm, never automatic, and the server refuses a delete that wasn't confirmed. Games ShadowMount manages are deleted through ShadowMount's own delete, so they're unmounted first. Whole drives, scan folders, the `backports`/`game-extras` folders themselves and system areas are never deleted.
 - **Editing images.** The in-image save fix writes directly to `.exfat`, `.ffpfs` and `.ffpfsc` files. It verifies checksums before writing and reads the data back afterwards, but keep a backup of anything you care about.
 - **How the `.ffpfsc` save fix works.** A `.ffpfsc` stores its exFAT image as separately compressed 64 KB blocks. GLM decompresses the one block holding the `libSceSaveData` entry, changes the name, and re-encodes it to exactly its old size. If it needs a few more bytes, it borrows them from a nearby block that compresses smaller; the blocks in between move with their compressed bytes unchanged. The affected bytes are saved to `<image>.glm-backup` first and restored if anything doesn't read back correctly, and the backup is deleted once everything checks out.
 - **Home tile.** The tile is installed as title ID `GLMG00001`. Set `tile=0` in `config.ini` to turn it off.
@@ -113,10 +115,10 @@ Where to look in `source/src/` for each part:
 | Area | Files | Main functions |
 |---|---|---|
 | Start-up and settings | `main.c`, `config.c`, `platform.c` | `main`, `config_load`, `plat_toast`, `plat_http_post` |
-| Web server and API | `httpd.c`, `web_index.c` (generated from `web/index.html`) | `accept_thread`, `conn_thread`, about 20 `/api/*` routes |
+| Web server and API | `httpd.c`, `web_index.c` (generated from `web/index.html`) | `accept_thread`, `conn_thread`, about 20 `/api/*` routes, `send_cover` (`/api/cover`) |
 | Scanner | `scan.c`, `imgpeek.c` | `scan_run`, `walk`, `check_game_dir`, `image_peek`, exFAT and UFS readers |
 | SMP client | `smp.c` | `smp_check`, `smp_api_games`, `smp_api_delete`, `smp_set_scan_depth` |
-| Jobs | `queue.c`, `copy.c`, `archive.c` | `worker_main`, `copy_tree`, `verify`, `archive_extract` |
+| Jobs | `queue.c`, `copy.c`, `archive.c` | `worker_main`, `copy_tree`, `verify`, `archive_extract`, `run_delete`, `delete_allowed` |
 | PKG | `pkginfo.c`, `crypto.c` | `pkg_inspect_json`, SHA-256, HMAC, SHA3, AES-128 and AES-XTS |
 | Home tile | `tile.c`, `blob_tile.c` (generated from `tile/icon0.png`) | `tile_install` |
 | `.ffpfs` / `.ffpfsc` I/O | `imgpeek.c` | `vio_open_pfs`, `pfsc_get`, `pfsc_put`, `pfsc_put_shift`, `zlib_encode_exact` |

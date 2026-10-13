@@ -10,7 +10,7 @@
 #include <stdint.h>
 #include <pthread.h>
 
-#define SS_VERSION "0.4.0"
+#define SS_VERSION "0.5.0"
 #define SS_MAX_PATH 1024
 #define SS_MAX_ROOTS 64
 #define SS_MAX_GAMES 2048
@@ -172,6 +172,11 @@ peek_result_t image_peek(const char *path, char *title_id, size_t tidsz,
 const char *image_kind(const char *name); /* "ufs","exfat","pfs","pfsc",NULL */
 int image_list_dir(const char *path, const char *subdir, char *out,
                    size_t outsz);
+/* Read a file inside an image, e.g. "sce_sys/icon0.png" (from the image
+ * root, read-only). Returns a malloc'd buffer the caller frees, or NULL if
+ * it isn't there or is bigger than maxlen. */
+uint8_t *image_read_file(const char *path, const char *file, size_t maxlen,
+                         size_t *outlen);
 
 /* ------------------------------------------------------------------ */
 /* Scanner                                                             */
@@ -194,7 +199,8 @@ typedef struct {
   char path[SS_MAX_PATH];
   char title_id[16];
   char title[128];
-  char kind[8];          /* folder, ufs, exfat, pfs, pfsc, pkg, archive */
+  char kind[16]; /* folder, ufs, exfat, pfs, pfsc, pkg, archive,
+                    leftovers, extras, backport */
   uint64_t size;
   uint64_t files;
   uint64_t dev;
@@ -241,6 +247,8 @@ void scan_start_async(void);
 void scan_run(void);
 bool scan_get_game(int id, game_t *out);
 const char *issue_name(issue_t i);
+/* leftovers / extras / backport: listed in the Library, but not games */
+bool is_extra_kind(const char *kind);
 /* Save fix: rename libSceSaveData*.sprx in a fakelib folder to .disabled
  * (undo = rename back). Returns files changed, -1 on error. */
 int savefix_apply(const char *fakelib_dir, bool undo, char *err, size_t errsz);
@@ -256,7 +264,13 @@ bool best_root_on_drive(const char *drive, char *out, size_t outsz);
 
 /* ------------------------------------------------------------------ */
 /* Jobs                                                                */
-typedef enum { JOB_FIX = 0, JOB_COPY, JOB_MOVE, JOB_EXTRACT } job_type_t;
+typedef enum {
+  JOB_FIX = 0,
+  JOB_COPY,
+  JOB_MOVE,
+  JOB_EXTRACT,
+  JOB_DELETE /* remove a game from its drive (no dst) */
+} job_type_t;
 #define JOBF_DELETE_SOURCE 1 /* extract: delete the archive afterwards */
 #define JOBF_SIBLINGS 2      /* extract: also copy release-folder extras */
 typedef enum {
